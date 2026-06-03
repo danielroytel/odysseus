@@ -90,6 +90,7 @@ KNOWN_CONTEXT_WINDOWS = {
     # --- Mistral ---
     'mistral-large': 128000,
     'mistral-medium': 32000,
+    'mistral-small-3': 128000,
     'mistral-small': 32000,
     'mistral-nemo': 128000,
     'mistral-7b': 32000,
@@ -110,6 +111,7 @@ KNOWN_CONTEXT_WINDOWS = {
     'llama-3': 131072,
 
     # --- Qwen ---
+    'qwen3.6': 131072,
     'qwen3': 131072,
     'qwen2.5': 131072,
     'qwen2': 32768,
