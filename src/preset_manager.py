@@ -137,6 +137,7 @@ Use precise language. Show causal relationships explicitly. Quantify uncertainty
         enabled: bool = True,
         inject_prefix: str = "",
         inject_suffix: str = "",
+        sandbox: bool = False,
     ) -> bool:
         """Update the custom preset"""
         self.presets["custom"] = {
@@ -148,6 +149,7 @@ Use precise language. Show causal relationships explicitly. Quantify uncertainty
             "inject_prefix": inject_prefix,
             "inject_suffix": inject_suffix,
             "enabled": enabled,
+            "sandbox": sandbox,
         }
         return self.save(self.presets)
     

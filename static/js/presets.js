@@ -599,6 +599,10 @@ export function openCustomPresetModal() {
   }
   if (promptInput) promptInput.value = savedConfig.system_prompt || '';
 
+  // Restore sandbox toggle
+  const sandboxInput = document.getElementById('custom-sandbox');
+  if (sandboxInput) sandboxInput.checked = !!savedConfig.sandbox;
+
   // Load inject fields
   const prefixInput = document.getElementById('inject-prefix');
   const suffixInput = document.getElementById('inject-suffix');
@@ -788,6 +792,7 @@ export async function saveCustomPreset(showToast, showError) {
     system_prompt: system_prompt,
     inject_prefix: _prefixInput ? _prefixInput.value : '',
     inject_suffix: _suffixInput ? _suffixInput.value : '',
+    sandbox: document.getElementById('custom-sandbox')?.checked || false,
   };
 
   try {

@@ -90,6 +90,10 @@ class PresetUpdateRequest(BaseModel):
         max_length=5000,
         description="Text to append to each outgoing user message"
     )
+    sandbox: bool = Field(
+        False,
+        description="Enable Docker sandbox for agent tool execution"
+    )
 
 
 class DirectoryRequest(BaseModel):

@@ -39,6 +39,7 @@ def setup_preset_routes(preset_manager) -> APIRouter:
                 preset_update.enabled,
                 preset_update.inject_prefix,
                 preset_update.inject_suffix,
+                preset_update.sandbox,
             )
             if success:
                 return {"success": True, "message": "Custom preset updated"}
