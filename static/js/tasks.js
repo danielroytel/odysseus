@@ -1939,6 +1939,7 @@ async function _renderActivityView() {
         sessionId: r.session_id || '',
         researchId: r.research_id || '',
         output_target: r.output_target || 'session',
+        hasSteps: r.has_steps || false,
       };
     });
     _buildChips();
@@ -2270,6 +2271,9 @@ function _renderActivityEntry(entry) {
     status = _classifyResult(entry.result);
   }
   const statusDot = `<span class="task-log-status task-log-status-${status}" title="${status}"></span>`;
+  const stepsBadge = entry.hasSteps
+    ? '<span class="task-log-steps-badge" title="This run used agent tools">tools</span>'
+    : '';
   // Render the result through markdown so code blocks, lists, links look right.
   let resultHtml;
   const _isRunning = entry.status === 'running' || entry.status === 'queued';
@@ -2394,6 +2398,7 @@ function _renderActivityEntry(entry) {
         ${statusDot}
         <span class="task-log-task-icon">${_taskIcon({ action: entry.action, task_type: entry.kind })}</span>
         <span class="task-log-name">${_escHtml(entry.taskName)}</span>${_taskAiMark(entry)}
+        ${stepsBadge}
         ${repeatBadge}
         <span style="flex:1"></span>
         ${rightHtml}

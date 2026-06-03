@@ -21922,6 +21922,14 @@ select.task-form-input { text-overflow: ellipsis; }
 .task-step-exit { font-size: 9px; opacity: 0.5; }
 .step-exit-ok { color: #4caf50; }
 .step-exit-err { color: #f44336; }
+.task-log-steps-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-secondary, #1a1a2e);
+  color: var(--text-secondary, #888);
+  border: 1px solid var(--border-color, #333);
+}
 .task-step-cmd code { font-size: 10px; background: var(--bg-secondary, #1a1a2e); padding: 1px 4px; border-radius: 2px; }
 .task-step-output pre { font-size: 10px; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; margin: 2px 0; opacity: 0.7; }
 
