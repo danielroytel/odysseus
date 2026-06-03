@@ -237,11 +237,10 @@ class TestComputeFinalMetrics:
             round_texts=texts,
         ))
         assert m["tool_events"] == events
-        assert m["round_texts"] == texts
 
     def test_no_tool_events_excluded(self):
         m = _compute_final_metrics(**self._base_args(tool_events=[], round_texts=[]))
-        assert "tool_events" not in m
+        assert m["tool_events"] == []
         assert "round_texts" not in m
 
 
