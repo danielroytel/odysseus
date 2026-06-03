@@ -281,3 +281,33 @@ def save_features(features: dict):
     from core.atomic_io import atomic_write_json
     atomic_write_json(FEATURES_FILE, features, indent=2)
     _invalidate_caches()
+
+
+# ---------------------------------------------------------------------------
+# Sandbox (Docker agent isolation)
+# ---------------------------------------------------------------------------
+
+SANDBOX_DEFAULTS = {
+    "image": "odysseus/sandbox:latest",
+    "memory": "4g",
+    "cpus": 2.0,
+    "pids_limit": 256,
+    "tmpfs_size": "512m",
+    "network": False,
+    "idle_timeout": 1800,
+}
+
+SANDBOX_IMAGES = {
+    "polyglot": "odysseus/sandbox:latest",
+    "python":   "python:3.12-slim",
+    "node":     "node:22-slim",
+    "rust":     "rust:1-slim",
+    "go":       "golang:1.23-alpine",
+    "minimal":  "alpine:3.20",
+}
+
+SANDBOX_CREDENTIAL_PASSTHROUGH = {
+    "git": True,
+    "gh": True,
+    "ssh": False,
+}

@@ -278,6 +278,46 @@ async def do_create_document(content_block: str, session_id: Optional[str] = Non
 
     db = SessionLocal()
     try:
+        # Duplicate detection: if a document with the same title already exists
+        # in this session, update it instead of creating a duplicate. This
+        # prevents models from re-creating files they already made in earlier
+        # turns (common with gemma-4 which loses track across responses).
+        _existing = (
+            db.query(Document)
+            .filter(Document.session_id == session_id, Document.title == title, Document.is_active == True)
+            .order_by(Document.created_at.desc())
+            .first()
+        )
+        if _existing:
+            # Update the existing document with the new content
+            _existing.current_content = content
+            _existing.language = language or _existing.language
+            _existing.version_count += 1
+            ver_id = str(uuid.uuid4())
+            ver = DocumentVersion(
+                id=ver_id,
+                document_id=_existing.id,
+                version_number=_existing.version_count,
+                content=content,
+                summary=f"Updated by {_active_model or 'AI'} (duplicate create redirected)",
+                source="ai",
+            )
+            db.add(ver)
+            db.commit()
+            set_active_document(_existing.id)
+            try:
+                from src.event_bus import fire_event
+                fire_event("document_updated", _existing.owner)
+            except Exception:
+                logger.debug("document_updated event dispatch failed", exc_info=True)
+            return {
+                "action": "update",
+                "doc_id": _existing.id,
+                "title": title,
+                "language": _existing.language,
+                "version": _existing.version_count,
+                "note": f"Document '{title}' already existed (v{_existing.version_count - 1}). Updated with new content instead of creating a duplicate.",
+            }
         doc_id = str(uuid.uuid4())
         ver_id = str(uuid.uuid4())
 

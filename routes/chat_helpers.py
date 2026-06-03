@@ -32,6 +32,7 @@ class PresetInfo:
     max_tokens: Optional[int]
     system_prompt: Optional[str]
     character_name: Optional[str]
+    sandbox_enabled: bool = False
 
 
 @dataclass
@@ -264,11 +265,18 @@ def extract_preset(chat_handler, preset_id) -> PresetInfo:
     temperature, max_tokens, system_prompt, char_name = (
         chat_handler.validate_and_extract_preset(preset_id)
     )
+    # Extract sandbox_enabled from preset config if available
+    sandbox_enabled = False
+    if preset_id and preset_id in chat_handler.preset_manager.presets:
+        preset = chat_handler.preset_manager.presets[preset_id]
+        if isinstance(preset, dict):
+            sandbox_enabled = preset.get("sandbox", False)
     return PresetInfo(
         temperature=temperature,
         max_tokens=max_tokens,
         system_prompt=system_prompt,
         character_name=char_name,
+        sandbox_enabled=sandbox_enabled,
     )
 
 

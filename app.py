@@ -692,6 +692,10 @@ app.include_router(setup_note_routes(task_scheduler))
 from routes.email_routes import setup_email_routes
 app.include_router(setup_email_routes())
 
+# Sandbox routes
+from routes.sandbox_routes import router as sandbox_router
+app.include_router(sandbox_router)
+
 from routes.vault_routes import setup_vault_routes
 app.include_router(setup_vault_routes())
 
@@ -907,6 +911,33 @@ async def _startup_event():
 
     _startup_tasks.append(asyncio.create_task(_warmup_endpoints()))
 
+    # --- Sandbox Manager ---
+    try:
+        from src.settings import _get_setting
+    except ImportError:
+        # Fallback for during initial integration
+        def _get_setting(key, default=None):
+            try:
+                from src.settings import get_setting
+                return get_setting(key, default)
+            except Exception:
+                return default
+
+    sandbox_enabled = _get_setting("sandbox_enabled", False)
+    if sandbox_enabled:
+        from src.sandbox import SandboxManager
+        sandbox_manager = SandboxManager()
+        try:
+            await sandbox_manager.detect_runtime()
+            await sandbox_manager.cleanup_orphans()
+            app.state.sandbox_manager = sandbox_manager
+            logger.info(f"Sandbox manager initialized (runtime: {sandbox_manager._runtime})")
+        except Exception as e:
+            logger.warning(f"Sandbox enabled but runtime unavailable: {e}")
+            app.state.sandbox_manager = None
+    else:
+        app.state.sandbox_manager = None
+
     # Keep-alive: ping endpoints every 60 seconds to prevent cold starts
     async def _keepalive_loop():
         while True:
@@ -918,6 +949,22 @@ async def _startup_event():
                 await asyncio.sleep(300)  # Back off on error
 
     _startup_tasks.append(asyncio.create_task(_keepalive_loop()))
+
+    # Sandbox idle cleanup task
+    async def _sandbox_idle_cleanup(app):
+        """Periodically clean up idle sandbox containers."""
+        while True:
+            await asyncio.sleep(300)  # every 5 minutes
+            manager = getattr(app.state, "sandbox_manager", None)
+            if manager:
+                try:
+                    cleaned = await manager.cleanup_idle()
+                    if cleaned:
+                        logger.info(f"Cleaned up {cleaned} idle sandbox containers")
+                except Exception as e:
+                    logger.warning(f"Sandbox idle cleanup failed: {e}")
+
+    _startup_tasks.append(asyncio.create_task(_sandbox_idle_cleanup(app)))
 
     async def _ensure_default_tasks():
         # Create/reconcile default automation tasks + personal assistant for every user.
@@ -1068,4 +1115,15 @@ async def _shutdown_event():
         await mcp_manager.disconnect_all()
     except Exception as e:
         logger.warning(f"MCP shutdown error: {e}")
+
+    # --- Sandbox cleanup ---
+    sandbox_manager = getattr(app.state, "sandbox_manager", None)
+    if sandbox_manager:
+        try:
+            cleaned = await sandbox_manager.cleanup_all()
+            if cleaned:
+                logger.info(f"Shut down {cleaned} sandbox containers")
+        except Exception as e:
+            logger.warning(f"Sandbox cleanup on shutdown failed: {e}")
+
     logger.info("Application shutdown complete")

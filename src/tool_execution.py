@@ -12,6 +12,7 @@ import collections
 import json
 import logging
 import os
+import shlex
 import sys
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
@@ -396,11 +397,14 @@ async def _call_mcp_tool(
     tool: str,
     content: str,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
+    sandbox_enabled: bool = False,
+    sandbox_manager = None,
+    session_id: Optional[str] = None,
 ) -> Dict:
     """Route a legacy tool call through the MCP manager, with direct fallbacks."""
     mcp = get_mcp_manager()
     if not mcp:
-        return await _direct_fallback(tool, content, progress_cb=progress_cb) or {"error": f"MCP manager not available for tool '{tool}'", "exit_code": 1}
+        return await _direct_fallback(tool, content, progress_cb=progress_cb, sandbox_enabled=sandbox_enabled, sandbox_manager=sandbox_manager, session_id=session_id) or {"error": f"MCP manager not available for tool '{tool}'", "exit_code": 1}
 
     server_id, tool_name = _MCP_TOOL_MAP[tool]
     qualified = f"mcp__{server_id}__{tool_name}"
@@ -409,7 +413,7 @@ async def _call_mcp_tool(
 
     # If MCP server not connected, try direct fallback
     if isinstance(result, dict) and result.get("exit_code") == 1 and "not connected" in result.get("error", ""):
-        fallback = await _direct_fallback(tool, content, progress_cb=progress_cb)
+        fallback = await _direct_fallback(tool, content, progress_cb=progress_cb, sandbox_enabled=sandbox_enabled, sandbox_manager=sandbox_manager, session_id=session_id)
         if fallback:
             return fallback
 
@@ -436,6 +440,9 @@ async def _direct_fallback(
     tool: str,
     content: str,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
+    sandbox_enabled: bool = False,
+    sandbox_manager = None,
+    session_id: Optional[str] = None,
 ) -> Optional[Dict]:
     """In-process execution path for the eight tools that used to live as
     stdio MCP servers under mcp_servers/. Those servers were deleted in
@@ -445,8 +452,73 @@ async def _direct_fallback(
     `progress_cb` is called periodically while bash/python subprocesses
     are still running, with `{elapsed_s, tail}` payloads. Other tools
     ignore it.
+
+    `sandbox_enabled` and `sandbox_manager` route bash/python/read_file/write_file
+    through the sandbox when enabled.
     """
     import json as _json
+
+    # --- Sandbox routing ---
+    if sandbox_enabled and sandbox_manager is not None:
+        from src.sandbox import SandboxError
+
+        # bash tool
+        if tool == "bash":
+            try:
+                rc, stdout, stderr = await sandbox_manager.exec(
+                    session_id, content,
+                    timeout=DEFAULT_BASH_TIMEOUT,
+                    progress_cb=progress_cb,
+                )
+                timed_out = False
+            except SandboxError as e:
+                return {"error": str(e), "exit_code": 1}
+
+            result = {"exit_code": rc}
+            if stdout:
+                result["stdout"] = stdout
+            if stderr:
+                result["stderr"] = stderr
+            return result
+
+        # python tool
+        if tool == "python":
+            try:
+                rc, stdout, stderr = await sandbox_manager.exec(
+                    session_id,
+                    f'{sys.executable or "python3"} -I -c {shlex.quote(content)}',
+                    timeout=DEFAULT_PYTHON_TIMEOUT,
+                    progress_cb=progress_cb,
+                )
+            except SandboxError as e:
+                return {"error": str(e), "exit_code": 1}
+
+            result = {"exit_code": rc}
+            if stdout:
+                result["stdout"] = stdout
+            if stderr:
+                result["stderr"] = stderr
+            return result
+
+        # read_file tool
+        if tool == "read_file":
+            raw_path = content.split("\n", 1)[0].strip()
+            try:
+                data = await sandbox_manager.read_file(session_id, f"/workspace/{raw_path.lstrip('/')}")
+                return {"content": data, "path": raw_path, "exit_code": 0}
+            except SandboxError as e:
+                return {"error": str(e), "exit_code": 1}
+
+        # write_file tool
+        if tool == "write_file":
+            lines = content.split("\n", 1)
+            raw_path = lines[0].strip()
+            body = lines[1] if len(lines) > 1 else ""
+            try:
+                await sandbox_manager.write_file(session_id, f"/workspace/{raw_path.lstrip('/')}", body)
+                return {"path": raw_path, "bytes_written": len(body), "exit_code": 0}
+            except SandboxError as e:
+                return {"error": str(e), "exit_code": 1}
 
     # Inherit env + force a sane terminal so subprocesses that touch
     # terminfo (anything calling `clear`, `tput`, `os.system("clear")`,
@@ -685,6 +757,8 @@ async def execute_tool_block(
     disabled_tools: Optional[set] = None,
     owner: Optional[str] = None,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
+    sandbox_enabled: bool = False,
+    sandbox_manager = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -794,7 +868,7 @@ async def execute_tool_block(
     if tool in _MCP_TOOL_MAP:
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _call_mcp_tool(tool, content, progress_cb=progress_cb)
+        result = await _call_mcp_tool(tool, content, progress_cb=progress_cb, sandbox_enabled=sandbox_enabled, sandbox_manager=sandbox_manager, session_id=session_id)
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
         desc = f"create_document: {title}"

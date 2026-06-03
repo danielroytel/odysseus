@@ -963,6 +963,8 @@ def setup_chat_routes(
                         disabled_tools=disabled_tools if disabled_tools else None,
                         owner=_user,
                         fallbacks=_fallback_candidates,
+                        sandbox_enabled=ctx.preset.sandbox_enabled,
+                        sandbox_manager=getattr(request.app.state, "sandbox_manager", None),
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

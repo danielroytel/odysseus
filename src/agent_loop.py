@@ -1357,6 +1357,8 @@ async def stream_agent_loop(
     relevant_tools: Optional[Set[str]] = None,
     fallbacks: Optional[List[tuple]] = None,
     _is_teacher_run: bool = False,
+    sandbox_enabled: bool = False,
+    sandbox_manager = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -1597,6 +1599,8 @@ async def stream_agent_loop(
     # signatures + consecutive no-text tool rounds to bail early.
     _recent_call_sigs = collections.deque(maxlen=6)
     _stuck_rounds = 0
+    _tool_only_rounds = 0  # consecutive rounds with tools but no answer text
+    _MAX_TOOL_ONLY_ROUNDS = 5  # bail after this many tool-only rounds in a row
     _tool_type_counts: collections.Counter = collections.Counter()
     _THINK_RE = re.compile(r'<think>.*?</think>', re.DOTALL | re.IGNORECASE)
     _force_answer = False  # set by loop-breaker → next round runs with NO tools
@@ -1974,10 +1978,23 @@ async def stream_agent_loop(
             _stuck_rounds += 1
         else:
             _stuck_rounds = 0
+        # Track consecutive tool-only rounds (no answer text, but tools used).
+        # Models like gemma-4 that create files one-per-round bypass the
+        # repeat-signature check because each call has different content.
+        if not _real_text and tool_blocks:
+            _tool_only_rounds += 1
+        else:
+            _tool_only_rounds = 0
         _runaway = next((t for t, n in _tool_type_counts.items() if n >= 15), None)
-        if _stuck_rounds >= 4 or _runaway:
-            reason = (f"calling {_runaway} over and over" if _runaway
-                      else "repeating the same tool calls without new progress")
+        # Trip on: repeated identical calls, runaway tool, OR too many
+        # consecutive tool-only rounds (sequential different calls, no text).
+        if _stuck_rounds >= 4 or _runaway or _tool_only_rounds >= _MAX_TOOL_ONLY_ROUNDS:
+            if _tool_only_rounds >= _MAX_TOOL_ONLY_ROUNDS:
+                reason = f"making {_tool_only_rounds} consecutive tool-only rounds without producing answer text"
+            elif _runaway:
+                reason = f"calling {_runaway} over and over"
+            else:
+                reason = "repeating the same tool calls without new progress"
             logger.warning(f"[agent] loop-breaker tripped on round {round_num} ({reason}); sig={_sig[:80]!r}")
             # The model has been executing tools, so its results are already
             # in context. Force ONE tool-free round to converge: write the
@@ -2075,6 +2092,8 @@ async def stream_agent_loop(
                         disabled_tools=disabled_tools,
                         owner=owner,
                         progress_cb=_push_progress,
+                        sandbox_enabled=sandbox_enabled,
+                        sandbox_manager=sandbox_manager,
                     )
                 finally:
                     # Sentinel so the drainer knows to stop.
@@ -2126,7 +2145,7 @@ async def stream_agent_loop(
                     )
                 else:
                     yield (
-                        f'data: {json.dumps({"type": "doc_update", "doc_id": result["doc_id"], "content": result["content"], "version": result["version"], "title": result.get("title", ""), "language": result.get("language")})}\n\n'
+                        f'data: {json.dumps({"type": "doc_update", "doc_id": result["doc_id"], "content": result["content"], "version": result["version"], "title": result.get("title", ""), "language": result.get("language"), "action": result["action"]})}\n\n'
                     )
 
             # Emit ui_control event for frontend to apply UI changes
@@ -2148,6 +2167,8 @@ async def stream_agent_loop(
                     output_text = f'Document edited: "{title}" (v{ver}, {result.get("applied", 0)} edit(s))'
                 elif action == "update":
                     output_text = f'Document updated: "{title}" (v{ver})'
+                    if result.get("note"):
+                        output_text += f'\n{result["note"]}'
             elif "stdout" in result:
                 # On a bash/python timeout the result carries error + (often
                 # empty) stdout/stderr; fall back to the error so the "timed
