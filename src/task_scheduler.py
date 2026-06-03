@@ -723,9 +723,12 @@ class TaskScheduler:
                     run.result = result
                 else:
                     # LLM task — use agent loop for tool access
-                    result = await self._execute_llm_task(task, db)
+                    result, captured_steps = await self._execute_llm_task(task, db)
                     run.status = "success"
                     run.result = result
+                    # Persist tool execution steps
+                    if captured_steps:
+                        run.steps = json.dumps(captured_steps)
                 # Record which model actually ran (resolved inside the executor).
                 if getattr(self, "_last_run_model", None):
                     run.model = self._last_run_model
@@ -1269,7 +1272,7 @@ class TaskScheduler:
             override_user_message=context,
         )
 
-    async def _execute_llm_task(self, task, db) -> str:
+    async def _execute_llm_task(self, task, db) -> tuple:
         """Execute an LLM task with full tool access via the agent loop."""
         from core.database import Session as DbSession, ChatMessage, CrewMember
 
@@ -1323,7 +1326,8 @@ class TaskScheduler:
         # as separate messages. More reliable than hoping the model calls tools.
         is_checkin = crew and crew.is_default_assistant and "check-in" in (task.name or "").lower()
         if is_checkin:
-            return await self._execute_checkin(task, crew, db, session_id, endpoint_url, model)
+            result = await self._execute_checkin(task, crew, db, session_id, endpoint_url, model)
+            return result, []
 
         # Build system prompt: crew member persona overrides the default.
         system_prompt = (
@@ -1373,12 +1377,18 @@ class TaskScheduler:
             logger.warning(f"[assistant] RAG tool selection failed, using all: {e}")
 
         # Try using the agent loop for full tool access
+        captured_steps = []
         try:
-            result = await self._run_agent_loop(
+            result, captured_steps = await self._run_agent_loop(
                 endpoint_url, model, task, session_id,
                 system_prompt=system_prompt, disabled_tools=disabled_tools,
                 relevant_tools=relevant_tools,
             )
+            # Truncate large tool outputs before DB persistence
+            _max_out = 10000
+            for _ev in (captured_steps or []):
+                if len(str(_ev.get("output", ""))) > _max_out:
+                    _ev["output"] = str(_ev["output"])[:_max_out] + "...[truncated]"
         except Exception as e:
             logger.warning(f"Agent loop failed for task '{task.name}', falling back to simple call: {e}")
             from src.llm_core import llm_call_async
@@ -1387,6 +1397,7 @@ class TaskScheduler:
                 {"role": "user", "content": task.prompt},
             ]
             result = await llm_call_async(url=endpoint_url, model=model, messages=messages, timeout=120)
+            captured_steps = []
 
         # Strip the model's chain-of-thought before saving/delivering. Task
         # output is LLM-only, so prose=True (which also removes untagged
@@ -1398,7 +1409,7 @@ class TaskScheduler:
         except Exception:
             pass
 
-        return result
+        return result, captured_steps or []
 
     async def _deliver_task_result(self, task, result: str, db, model: str = None):
         """Deliver a completed task result according to output_target.
@@ -1550,7 +1561,7 @@ class TaskScheduler:
                               system_prompt: str | None = None,
                               disabled_tools: set | None = None,
                               relevant_tools: set | None = None,
-                              override_user_message: str | None = None) -> str:
+                              override_user_message: str | None = None) -> tuple:
         """Run the full agent loop with tool access, collecting the final text."""
         from src.agent_loop import stream_agent_loop
 
@@ -1579,6 +1590,7 @@ class TaskScheduler:
             pass
         full_text = ""
         tool_results = []
+        captured_tool_events = []   # collected from metrics event for steps persistence
 
         # Honor per-task max_steps (defense against runaway agent loops).
         # Falls back to 20 if not set — the historical default.
@@ -1616,6 +1628,10 @@ class TaskScheduler:
                         tool_summary = data.get("stdout") or data.get("output") or data.get("result") or ""
                         if isinstance(tool_summary, str) and tool_summary.strip():
                             tool_results.append(f"[{data.get('tool', '?')}] {tool_summary[:500]}")
+                    elif data.get("type") == "metrics":
+                        _te = (data.get("data") or {}).get("tool_events")
+                        if _te:
+                            captured_tool_events = _te
                 except (json.JSONDecodeError, KeyError):
                     pass
 
@@ -1647,7 +1663,7 @@ class TaskScheduler:
                 if tool_results:
                     full_text = "\n".join(tool_results[-5:])
 
-        return full_text or "(no output)"
+        return full_text or "(no output)", captured_tool_events
 
     async def _execute_research_task(self, task, db) -> str:
         """Execute a deep research task using DeepResearcher."""

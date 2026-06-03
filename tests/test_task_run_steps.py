@@ -68,3 +68,52 @@ class TestToolEventsInMetrics:
             model="test-model",
         )
         assert metrics.get("tool_events") == []
+
+
+class TestStepsSerialization:
+    """Verify steps JSON structure is valid and compact."""
+
+    def test_steps_json_roundtrip(self):
+        events = [
+            {"round": 1, "tool": "web_search", "command": "sydney weather", "output": "25C sunny", "exit_code": 0},
+            {"round": 2, "tool": "bash", "command": "echo hello", "output": "hello", "exit_code": 0},
+        ]
+        serialized = json.dumps(events)
+        assert json.loads(serialized) == events
+
+    def test_steps_json_handles_unicode(self):
+        events = [
+            {"round": 1, "tool": "web_search", "command": "wetter in münchen", "output": "sonnig", "exit_code": 0},
+        ]
+        serialized = json.dumps(events, ensure_ascii=False)
+        deserialized = json.loads(serialized)
+        assert deserialized[0]["command"] == "wetter in münchen"
+
+    def test_steps_json_empty_list(self):
+        serialized = json.dumps([])
+        assert serialized == "[]"
+        assert json.loads(serialized) == []
+
+    def test_steps_with_optional_fields(self):
+        events = [
+            {
+                "round": 1, "tool": "generate_image", "command": "a sunset",
+                "output": "Generated", "exit_code": 0,
+                "image_url": "https://example.com/img.png",
+                "image_prompt": "a sunset", "image_model": "flux",
+            },
+        ]
+        serialized = json.dumps(events)
+        deserialized = json.loads(serialized)
+        assert "image_url" in deserialized[0]
+
+    def test_steps_output_truncation(self):
+        large_output = "x" * 50000
+        events = [
+            {"round": 1, "tool": "bash", "command": "cat huge.log", "output": large_output, "exit_code": 0},
+        ]
+        max_output_len = 10000
+        for e in events:
+            if len(e.get("output", "")) > max_output_len:
+                e["output"] = e["output"][:max_output_len] + "...[truncated]"
+        assert len(events[0]["output"]) <= max_output_len + 20
