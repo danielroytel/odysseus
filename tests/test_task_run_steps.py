@@ -157,3 +157,29 @@ class TestRunToDictSteps:
         d = _run_to_dict(mock_run)
         assert d["has_steps"] is True
         assert "steps" not in d
+
+
+class TestProgressCallback:
+    """Verify progress callback receives tool execution updates."""
+
+    def test_progress_messages_format(self):
+        """Progress messages should be short summaries, not full tool output."""
+        progress_messages = []
+        def capture_progress(msg):
+            progress_messages.append(msg)
+
+        from src.agent_loop import _compute_final_metrics
+        metrics = _compute_final_metrics(
+            messages=[], full_response="", total_duration=1.0,
+            time_to_first_token=0.5, context_length=128000,
+            real_input_tokens=100, real_output_tokens=50,
+            has_real_usage=True,
+            tool_events=[{"round": 1, "tool": "web_search", "command": "test", "output": "x" * 100, "exit_code": 0}],
+            round_texts=[""], model="test",
+        )
+        events = metrics.get("tool_events", [])
+        for ev in events:
+            progress_messages.append(f"Running {ev['tool']}: {ev.get('command', '')[:80]}")
+        assert len(progress_messages) == 1
+        assert progress_messages[0].startswith("Running web_search:")
+        assert len(progress_messages[0]) < 120

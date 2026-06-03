@@ -710,6 +710,11 @@ class TaskScheduler:
             # previous llm/research run's model. The executors set it once the
             # model is resolved.
             self._last_run_model = None
+
+            # Progress callback for live updates during task execution
+            def _progress(message: str):
+                self._set_run_progress(run_id, message)
+
             try:
                 if task_type == "action":
                     result, success = await self._execute_action(task, run_id=run_id)
@@ -723,7 +728,7 @@ class TaskScheduler:
                     run.result = result
                 else:
                     # LLM task — use agent loop for tool access
-                    result, captured_steps = await self._execute_llm_task(task, db)
+                    result, captured_steps = await self._execute_llm_task(task, db, progress_cb=_progress)
                     run.status = "success"
                     run.result = result
                     # Persist tool execution steps
@@ -1272,7 +1277,7 @@ class TaskScheduler:
             override_user_message=context,
         )
 
-    async def _execute_llm_task(self, task, db) -> tuple:
+    async def _execute_llm_task(self, task, db, progress_cb=None) -> tuple:
         """Execute an LLM task with full tool access via the agent loop."""
         from core.database import Session as DbSession, ChatMessage, CrewMember
 
@@ -1383,6 +1388,7 @@ class TaskScheduler:
                 endpoint_url, model, task, session_id,
                 system_prompt=system_prompt, disabled_tools=disabled_tools,
                 relevant_tools=relevant_tools,
+                progress_cb=progress_cb,
             )
             # Truncate large tool outputs before DB persistence
             _max_out = 10000
@@ -1561,7 +1567,8 @@ class TaskScheduler:
                               system_prompt: str | None = None,
                               disabled_tools: set | None = None,
                               relevant_tools: set | None = None,
-                              override_user_message: str | None = None) -> tuple:
+                              override_user_message: str | None = None,
+                              progress_cb=None) -> tuple:
         """Run the full agent loop with tool access, collecting the final text."""
         from src.agent_loop import stream_agent_loop
 
@@ -1628,6 +1635,10 @@ class TaskScheduler:
                         tool_summary = data.get("stdout") or data.get("output") or data.get("result") or ""
                         if isinstance(tool_summary, str) and tool_summary.strip():
                             tool_results.append(f"[{data.get('tool', '?')}] {tool_summary[:500]}")
+                        if progress_cb:
+                            _tn = data.get("tool", "?")
+                            _tc = (data.get("command") or data.get("query") or "")[:80]
+                            progress_cb(f"Tool: {_tn}" + (f" — {_tc}" if _tc else ""))
                     elif data.get("type") == "metrics":
                         _te = (data.get("data") or {}).get("tool_events")
                         if _te:
