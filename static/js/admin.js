@@ -2040,11 +2040,253 @@ function initDangerZone() {
 }
 
 /* ═══════════════════════════════════════════
+   SANDBOX TAB
+   ═══════════════════════════════════════════ */
+
+let sandboxLoaded = false;
+
+function formatAge(created) {
+  if (!created) return 'unknown';
+  const now = Math.floor(Date.now() / 1000);
+  const age = now - created;
+  if (age < 60) return `${age}s`;
+  if (age < 3600) return `${Math.floor(age / 60)}m`;
+  if (age < 86400) return `${Math.floor(age / 3600)}h`;
+  return `${Math.floor(age / 86400)}d`;
+}
+
+function loadSandboxSettings() {
+  if (sandboxLoaded) return;
+  fetch('/api/sandbox/status', { credentials: 'same-origin' })
+    .then(res => res.json())
+    .then(data => {
+      // Populate form fields
+      const enabled = modalEl.querySelector('[data-sandbox-enabled]');
+      const image = modalEl.querySelector('[data-sandbox-image]');
+      const memory = modalEl.querySelector('[data-sandbox-memory]');
+      const cpus = modalEl.querySelector('[data-sandbox-cpus]');
+      const idleTimeout = modalEl.querySelector('[data-sandbox-idle-timeout]');
+      const network = modalEl.querySelector('[data-sandbox-network]');
+      const credGit = modalEl.querySelector('[data-sandbox-cred-git]');
+      const credGh = modalEl.querySelector('[data-sandbox-cred-gh]');
+      const credSsh = modalEl.querySelector('[data-sandbox-cred-ssh]');
+
+      if (enabled) enabled.checked = data.enabled || false;
+      if (image) image.value = data.image || 'odysseus/sandbox:latest';
+      if (memory) memory.value = data.memory || '4g';
+      if (cpus) cpus.value = data.cpus || '2';
+      if (idleTimeout) idleTimeout.value = data.idle_timeout || '1800';
+      if (network) network.checked = data.network_access || false;
+      if (credGit) credGit.checked = data.cred_git !== false;
+      if (credGh) credGh.checked = data.cred_gh !== false;
+      if (credSsh) credSsh.checked = data.cred_ssh || false;
+
+      renderSandboxContainers(data.containers || []);
+      sandboxLoaded = true;
+    })
+    .catch(err => {
+      console.error('[sandbox] Failed to load settings:', err);
+    });
+}
+
+function formatIdle(idle) {
+  if (!idle && idle !== 0) return '';
+  if (idle < 60) return `${idle}s`;
+  if (idle < 3600) return `${Math.floor(idle / 60)}m idle`;
+  return `${Math.floor(idle / 3600)}h idle`;
+}
+
+function renderSandboxContainers(containers) {
+  const containerDiv = modalEl.querySelector('[data-sandbox-containers]');
+  if (!containerDiv) return;
+
+  if (!containers || containers.length === 0) {
+    containerDiv.innerHTML = '<div class="admin-toggle-sub">No active containers</div>';
+    return;
+  }
+
+  containerDiv.innerHTML = '';
+  containers.forEach(c => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);';
+    const stats = [];
+    if (c.mem_usage) stats.push(esc(c.mem_usage));
+    if (c.cpu_pct) stats.push(esc(c.cpu_pct));
+    if (c.pids) stats.push(esc(c.pids) + ' pids');
+    const idleStr = formatIdle(c.idle_s);
+    if (idleStr) stats.push(idleStr);
+    row.innerHTML = `
+      <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <div style="font-weight:600;font-size:11px;">${esc(c.session_id ? c.session_id.substring(0, 8) : 'unknown')}</div>
+        <div style="opacity:0.7;font-size:10px;">${esc(c.image || 'unknown')} &bull; ${esc(formatAge(c.created_at))}</div>
+      </div>
+      <div style="font-size:10px;opacity:0.6;">${stats.join(' &bull; ')}</div>
+    `;
+    containerDiv.appendChild(row);
+  });
+}
+
+async function saveSandboxSetting(key, value) {
+  try {
+    const body = {};
+    body[key] = value;
+    await fetch('/api/sandbox/settings', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    console.error('[sandbox] Failed to save setting:', key, e);
+  }
+}
+
+function initSandboxToggles() {
+  // Enable/disable sandbox
+  const enabled = modalEl.querySelector('[data-sandbox-enabled]');
+  if (enabled) {
+    enabled.addEventListener('change', () => {
+      saveSandboxSetting('enabled', enabled.checked);
+    });
+  }
+
+  // Container configuration selects
+  const image = modalEl.querySelector('[data-sandbox-image]');
+  if (image) {
+    image.addEventListener('change', () => {
+      saveSandboxSetting('image', image.value);
+    });
+  }
+
+  const memory = modalEl.querySelector('[data-sandbox-memory]');
+  if (memory) {
+    memory.addEventListener('change', () => {
+      saveSandboxSetting('memory', memory.value);
+    });
+  }
+
+  const cpus = modalEl.querySelector('[data-sandbox-cpus]');
+  if (cpus) {
+    cpus.addEventListener('change', () => {
+      saveSandboxSetting('cpus', cpus.value);
+    });
+  }
+
+  const idleTimeout = modalEl.querySelector('[data-sandbox-idle-timeout]');
+  if (idleTimeout) {
+    idleTimeout.addEventListener('change', () => {
+      saveSandboxSetting('idle_timeout', idleTimeout.value);
+    });
+  }
+
+  // Network access toggle
+  const network = modalEl.querySelector('[data-sandbox-network]');
+  if (network) {
+    network.addEventListener('change', () => {
+      saveSandboxSetting('network_access', network.checked);
+    });
+  }
+
+  // Credential passthrough toggles
+  const credGit = modalEl.querySelector('[data-sandbox-cred-git]');
+  if (credGit) {
+    credGit.addEventListener('change', () => {
+      saveSandboxSetting('cred_git', credGit.checked);
+    });
+  }
+
+  const credGh = modalEl.querySelector('[data-sandbox-cred-gh]');
+  if (credGh) {
+    credGh.addEventListener('change', () => {
+      saveSandboxSetting('cred_gh', credGh.checked);
+    });
+  }
+
+  const credSsh = modalEl.querySelector('[data-sandbox-cred-ssh]');
+  if (credSsh) {
+    credSsh.addEventListener('change', () => {
+      saveSandboxSetting('cred_ssh', credSsh.checked);
+    });
+  }
+
+  // Test button
+  const testBtn = modalEl.querySelector('[data-sandbox-test]');
+  if (testBtn) {
+    testBtn.addEventListener('click', async () => {
+      const resultDiv = modalEl.querySelector('[data-sandbox-test-result]');
+      testBtn.disabled = true;
+      testBtn.textContent = 'Testing...';
+      if (resultDiv) {
+        resultDiv.style.display = 'block';
+        resultDiv.textContent = 'Creating test container...';
+        resultDiv.style.color = 'var(--fg)';
+      }
+
+      try {
+        const res = await fetch('/api/sandbox/test', { method: 'POST', credentials: 'same-origin' });
+        const data = await res.json();
+        if (res.ok) {
+          if (resultDiv) {
+            resultDiv.textContent = 'Success! Container started and stopped.';
+            resultDiv.style.color = 'var(--green)';
+          }
+        } else {
+          if (resultDiv) {
+            resultDiv.textContent = 'Failed: ' + (data.detail || data.message || 'Unknown error');
+            resultDiv.style.color = 'var(--red)';
+          }
+        }
+      } catch (e) {
+        if (resultDiv) {
+          resultDiv.textContent = 'Error: ' + e.message;
+          resultDiv.style.color = 'var(--red)';
+        }
+      } finally {
+        testBtn.disabled = false;
+        testBtn.textContent = 'Test Container';
+      }
+    });
+  }
+
+  // Cleanup button
+  const cleanupBtn = modalEl.querySelector('[data-sandbox-cleanup]');
+  if (cleanupBtn) {
+    cleanupBtn.addEventListener('click', async () => {
+      cleanupBtn.disabled = true;
+      cleanupBtn.textContent = 'Cleaning...';
+      try {
+        const res = await fetch('/api/sandbox/cleanup', { method: 'POST', credentials: 'same-origin' });
+        const data = await res.json();
+        // Refresh container list after cleanup
+        setTimeout(() => {
+          sandboxLoaded = false;
+          loadSandboxSettings();
+        }, 500);
+      } catch (e) {
+        console.error('[sandbox] Cleanup failed:', e);
+      } finally {
+        cleanupBtn.disabled = false;
+        cleanupBtn.textContent = 'Cleanup Idle';
+      }
+    });
+  }
+
+  // Refresh button
+  const refreshBtn = modalEl.querySelector('[data-sandbox-refresh]');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      sandboxLoaded = false;
+      loadSandboxSettings();
+    });
+  }
+}
+
+/* ═══════════════════════════════════════════
    INIT & REFRESH
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initSandboxToggles, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }
@@ -2069,6 +2311,9 @@ export function _initData() {
 
 export function open(tab) {
   _initData();
+  if (tab === 'sandbox') {
+    loadSandboxSettings();
+  }
   settingsModule.open(tab || 'services');
 }
 
@@ -2076,5 +2321,5 @@ export function close() {
   settingsModule.close();
 }
 
-const adminModule = { open, close, _initData, get _initialized() { return initialized; } };
+const adminModule = { open, close, _initData, loadSandboxSettings, get _initialized() { return initialized; } };
 export default adminModule;

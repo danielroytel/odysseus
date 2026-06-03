@@ -15,7 +15,7 @@ function el(id) { return document.getElementById(id); }
 function esc(s) { return uiModule.esc(s); }
 
 /* ── Tab switching ── */
-const ADMIN_TABS = new Set(['services', 'integrations', 'tools', 'users', 'system']);
+const ADMIN_TABS = new Set(['services', 'integrations', 'tools', 'users', 'sandbox', 'system']);
 
 function initTabs() {
   modalEl.querySelectorAll('[data-settings-tab]').forEach(btn => {

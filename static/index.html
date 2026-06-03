@@ -1174,6 +1174,13 @@
                   Expand
                 </button>
               </div>
+              <div class="admin-toggle-row" style="margin-top:8px;">
+                <div>
+                  <div class="admin-toggle-label">Sandbox mode</div>
+                  <div class="admin-toggle-sub">Run agent tools in an isolated container</div>
+                </div>
+                <label class="admin-switch"><input type="checkbox" id="custom-sandbox"><span class="admin-switch-slider"></span></label>
+              </div>
             </div>
             <!-- Group tab -->
             <div class="preset-chartab" data-chartab-panel="group" style="display:none">
@@ -1365,6 +1372,10 @@
           <button class="settings-nav-item admin-only" data-settings-tab="users">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span>Users</span>
+          </button>
+          <button class="settings-nav-item admin-only" data-settings-tab="sandbox">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <span>Sandbox</span>
           </button>
           <button class="settings-nav-item admin-only" data-settings-tab="system">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -2216,6 +2227,104 @@
             </div>
 
             <div id="adm-wipeMsg" style="margin-top:8px;"></div>
+          </div>
+        </div>
+
+        <!-- ═══ SANDBOX TAB ═══ -->
+        <div data-settings-panel="sandbox" class="hidden">
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Sandbox</h2>
+            <div class="admin-toggle-sub">Isolate agent tool execution in Docker containers</div>
+
+            <div class="admin-toggle-row">
+              <div class="admin-toggle-label">Enable Sandbox</div>
+              <label class="admin-switch"><input type="checkbox" data-sandbox-enabled><span class="admin-slider"></span></label>
+            </div>
+          </div>
+
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>Container Configuration</h2>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label">Image</label>
+                <select data-sandbox-image class="settings-select">
+                  <option value="odysseus/sandbox:latest">Polyglot (all languages)</option>
+                  <option value="python:3.12-slim">Python only</option>
+                  <option value="node:22-slim">Node.js only</option>
+                  <option value="rust:1-slim">Rust only</option>
+                  <option value="golang:1.23-alpine">Go only</option>
+                  <option value="alpine:3.20">Minimal (shell only)</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Memory</label>
+                <select data-sandbox-memory class="settings-select">
+                  <option value="2g">2 GB</option>
+                  <option value="4g" selected>4 GB</option>
+                  <option value="8g">8 GB</option>
+                  <option value="16g">16 GB</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">CPUs</label>
+                <select data-sandbox-cpus class="settings-select">
+                  <option value="1">1</option>
+                  <option value="2" selected>2</option>
+                  <option value="4">4</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Idle Timeout</label>
+                <select data-sandbox-idle-timeout class="settings-select">
+                  <option value="900">15 min</option>
+                  <option value="1800" selected>30 min</option>
+                  <option value="3600">1 hour</option>
+                  <option value="14400">4 hours</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="admin-toggle-row" style="margin-top:8px">
+              <div class="admin-toggle-label">Network Access</div>
+              <label class="admin-switch"><input type="checkbox" data-sandbox-network><span class="admin-slider"></span></label>
+            </div>
+            <div class="admin-toggle-sub">Allow containers to make outbound network requests</div>
+          </div>
+
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Credential Passthrough</h2>
+            <div class="admin-toggle-sub">Mount host credentials into containers (read-only)</div>
+
+            <div class="admin-toggle-row">
+              <div class="admin-toggle-label">Git config</div>
+              <label class="admin-switch"><input type="checkbox" data-sandbox-cred-git checked><span class="admin-slider"></span></label>
+            </div>
+            <div class="admin-toggle-row">
+              <div class="admin-toggle-label">GitHub CLI</div>
+              <label class="admin-switch"><input type="checkbox" data-sandbox-cred-gh checked><span class="admin-slider"></span></label>
+            </div>
+            <div class="admin-toggle-row">
+              <div class="admin-toggle-label">SSH keys</div>
+              <label class="admin-switch"><input type="checkbox" data-sandbox-cred-ssh><span class="admin-slider"></span></label>
+            </div>
+          </div>
+
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Test & Monitoring</h2>
+
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <button data-sandbox-test class="admin-btn-add" style="font-size:11px">Test Container</button>
+              <button data-sandbox-cleanup class="admin-btn-sm" style="font-size:11px">Cleanup Idle</button>
+            </div>
+
+            <div data-sandbox-test-result style="display:none" class="admin-toggle-sub"></div>
+
+            <div style="font-size:12px;margin:8px 0 4px">Active Containers</div>
+            <div data-sandbox-containers style="font-size:11px;color:var(--fg)">
+              <div class="admin-toggle-sub">Loading...</div>
+            </div>
+
+            <button data-sandbox-refresh class="admin-btn-sm" style="font-size:11px;margin-top:6px">Refresh</button>
           </div>
         </div>
 
