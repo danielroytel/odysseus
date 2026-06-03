@@ -1,20 +1,34 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVICE_FILE="$SCRIPT_DIR/odysseus-ui.service"
+DIR="$(cd "$(dirname "$0")" && pwd)"
+SERVICE="odysseus.service"
 
-if [ ! -f "$SERVICE_FILE" ]; then
-  echo "Error: odysseus-ui.service not found in $SCRIPT_DIR"
-  exit 1
+if [[ ! -f "$DIR/$SERVICE" ]]; then
+    echo "ERROR: $SERVICE not found in $DIR"
+    exit 1
 fi
 
-echo "Installing Odysseus UI service..."
-echo "Make sure you've edited odysseus-ui.service with your username and paths first!"
+echo "Installing Odysseus systemd service..."
 echo ""
 
-sudo cp "$SERVICE_FILE" /etc/systemd/system/
+# Stop any running instance first
+if systemctl is-active odysseus &>/dev/null; then
+    echo "Stopping running instance..."
+    sudo systemctl stop odysseus
+fi
+
+# Install and enable
+sudo cp "$DIR/$SERVICE" /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable odysseus-ui
-sudo systemctl start odysseus-ui
-sudo systemctl status odysseus-ui
+sudo systemctl enable odysseus
+
+echo ""
+echo "Service installed and enabled."
+echo ""
+echo "Commands:"
+echo "  sudo systemctl start odysseus     # Start now"
+echo "  sudo systemctl stop odysseus      # Stop now"
+echo "  sudo systemctl restart odysseus   # Restart"
+echo "  systemctl status odysseus         # Check status"
+echo "  journalctl -u odysseus -f         # View logs"

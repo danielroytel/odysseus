@@ -1,0 +1,27 @@
+[Unit]
+Description=Odysseus AI Workspace
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=forking
+User=droytel
+Group=droytel
+WorkingDirectory=/home/droytel/Documents/Github/odysseus
+ExecStart=/home/droytel/Documents/Github/odysseus/odysseus.sh start
+ExecStop=/home/droytel/Documents/Github/odysseus/odysseus.sh stop
+ExecReload=/home/droytel/Documents/Github/odysseus/odysseus.sh restart
+PIDFile=/home/droytel/Documents/Github/odysseus/odysseus.pid
+
+# Model loading can take 60s+; give systemd plenty of time
+TimeoutStartSec=120
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=10
+
+# Load .env into the service environment
+EnvironmentFile=-/home/droytel/Documents/Github/odysseus/.env
+
+[Install]
+WantedBy=multi-user.target
