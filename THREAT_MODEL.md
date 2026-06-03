@@ -72,10 +72,24 @@ External content that reaches the LLM is treated as untrusted via `src/prompt_se
 
 These are open, acknowledged, and contributor help is welcome:
 
-1. **No shell/filesystem sandbox.** The agent `bash` and `read_file`/`write_file` tools run as the app process user with no network egress filtering or filesystem confinement. A successful prompt-injection reaching a shell-enabled admin session can make outbound requests to internal services. See #1058 for the sandbox proposal.
+1. **Shell/filesystem sandbox (mitigated).** Agent tool execution can optionally be isolated in per-session Docker containers via `src/sandbox.py`. When enabled, bash, python, read_file, and write_file execute inside a hardened container with `--network none`, `--read-only` rootfs, `--cap-drop ALL`, `--user 1000:1000`, and resource limits. The container has read-write access to the mounted workspace only. Credential passthrough (git config, gh auth, SSH keys) is configurable but off by default for SSH. Sandbox is opt-in per character/session and fail-closed (refuses execution if container runtime is unavailable). When sandbox is disabled, tools run as the app process user with no isolation — see residual risk below.
 
 2. **SSRF via `/api/v1/chat` `base_url` parameter.** A chat-scoped API token can supply an arbitrary `base_url`; the server forwards the LLM request to that host without validating the scheme or address. PR #1039 fixes this.
 
 3. **`src/search/` partial consolidation.** `src.search.core` and `src.search.providers` correctly alias `services.search` via `sys.modules` replacement. `analytics`, `cache`, `content`, `query`, and `ranking` are still independent copies that can drift. The SSRF regression tests in `tests/test_webhook_ssrf_resilience.py` test `src.webhook_manager` directly (separate from search), so the safety net there is intact. See #1058.
 
 4. **Token scopes are coarse.** There is no way to grant a session a subset of the owning user's privileges. Companion/mobile tokens carry either `chat` or `admin` scope with no per-capability granularity.
+
+## Sandbox Residual Risks
+
+When sandbox is enabled, the following residual risks remain:
+
+1. **Container escape.** A kernel exploit or Docker daemon vulnerability could allow a process inside the container to reach the host. Mitigated by `--cap-drop ALL`, `--read-only`, `no-new-privileges`, and running as non-root (uid 1000). Podman's user namespaces provide stronger isolation than Docker's default.
+
+2. **Credential exposure.** Git config and gh tokens are mounted read-only into the container. A compromised container process can read these credentials. SSH key passthrough is off by default. Admins should evaluate the tradeoff for their threat model.
+
+3. **Workspace data loss.** The container has read-write access to the mounted workspace. A prompt injection could delete or corrupt workspace files. This is inherent to any useful development tool — the sandbox prevents damage to anything outside the workspace.
+
+4. **Docker daemon attack surface.** Enabling sandbox requires Docker/Podman to be installed and the app user to have access to the daemon. A compromised Docker daemon gives full root access to the host. Rootless Podman or Docker in rootless mode reduces this risk.
+
+5. **Sandbox disabled sessions.** The sandbox is opt-in. Sessions where it is not enabled still run tools as the app process user on the host, with no isolation beyond path confinement (`_resolve_tool_path`).
