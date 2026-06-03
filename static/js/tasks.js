@@ -1504,6 +1504,49 @@ function _showForm(existing, initTaskType, initTriggerType) {
   });
 }
 
+// ---- Steps Timeline ----
+
+async function _renderStepsTimeline(runId, container) {
+  if (container.dataset.loaded === 'true') {
+    container.innerHTML = '';
+    container.dataset.loaded = '';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/tasks/runs/${encodeURIComponent(runId)}/steps`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const steps = data.steps || [];
+    if (!steps.length) {
+      container.innerHTML = '<div style="opacity:0.4;font-size:11px;padding:4px 0;">No tool calls recorded.</div>';
+      container.dataset.loaded = 'true';
+      return;
+    }
+    let html = '<div class="task-steps-timeline">';
+    for (const step of steps) {
+      const toolName = _esc(step.tool || '?');
+      const cmd = _esc((step.command || '').length > 120 ? (step.command || '').slice(0, 120) + '\u2026' : (step.command || ''));
+      const output = _esc((step.output || '').length > 200 ? (step.output || '').slice(0, 200) + '\u2026' : (step.output || ''));
+      const exitCode = step.exit_code != null ? step.exit_code : '';
+      const exitClass = exitCode === 0 ? 'step-exit-ok' : exitCode ? 'step-exit-err' : '';
+      html += '<div class="task-step-item">' +
+        '<div class="task-step-header">' +
+          '<span class="task-step-round">R' + (step.round || '?') + '</span>' +
+          '<span class="task-step-tool">' + toolName + '</span>' +
+          '<span class="task-step-exit ' + exitClass + '">' + (exitCode !== '' ? 'exit:' + exitCode : '') + '</span>' +
+        '</div>' +
+        (cmd ? '<div class="task-step-cmd"><code>' + cmd + '</code></div>' : '') +
+        (output ? '<div class="task-step-output"><pre>' + output + '</pre></div>' : '') +
+      '</div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+    container.dataset.loaded = 'true';
+  } catch (e) {
+    container.innerHTML = '<div style="opacity:0.5;font-size:11px;">Failed to load steps: ' + _escHtml(e.message) + '</div>';
+  }
+}
+
 // ---- Run History ----
 
 async function _showRunHistory(taskId, taskName) {
@@ -1529,15 +1572,18 @@ async function _showRunHistory(taskId, taskName) {
     html += '<div class="task-runs-list">';
     for (const run of runs) {
       const statusClass = run.status === 'success' ? 'task-run-success' : run.status === 'error' ? 'task-run-error' : 'task-run-running';
-      html += `<div class="task-run-item ${statusClass}">
-        <div class="task-run-item-header">
-          ${_statusDot(run.status === 'success' ? 'active' : run.status)}
-          <span>${run.status}</span>
-          ${run.model ? `<span class="task-run-model" style="font-size:10px;opacity:0.5;">${_esc(run.model.split('/').pop())}</span>` : ''}
-          <span class="task-run-time" title="${run.started_at ? _esc(_relativeTime(run.started_at)) : ''}">${run.started_at ? _absoluteTime(run.started_at) : ''}</span>
-        </div>
-        <div class="task-run-result">${_esc(run.result ? (run.result.length > 300 ? run.result.slice(0, 300) + '…' : run.result) : run.error || '—')}</div>
-      </div>`;
+      const stepsBtn = run.has_steps ? '<button class="task-steps-toggle" data-run-id="' + _esc(run.id) + '" type="button">Show tool calls</button>' : '';
+      html += '<div class="task-run-item ' + statusClass + '">' +
+        '<div class="task-run-item-header">' +
+          _statusDot(run.status === 'success' ? 'active' : run.status) +
+          '<span>' + run.status + '</span>' +
+          (run.model ? '<span class="task-run-model" style="font-size:10px;opacity:0.5;">' + _esc(run.model.split('/').pop()) + '</span>' : '') +
+          '<span class="task-run-time" title="' + (run.started_at ? _esc(_relativeTime(run.started_at)) : '') + '">' + (run.started_at ? _absoluteTime(run.started_at) : '') + '</span>' +
+        '</div>' +
+        '<div class="task-run-result">' + _esc(run.result ? (run.result.length > 300 ? run.result.slice(0, 300) + '\u2026' : run.result) : run.error || '\u2014') + '</div>' +
+        stepsBtn +
+        '<div class="task-steps-container" data-run-id="' + _esc(run.id) + '"></div>' +
+      '</div>';
     }
     html += '</div>';
   }
@@ -1559,6 +1605,17 @@ async function _showRunHistory(taskId, taskName) {
     resultEl.addEventListener('click', () => {
       expanded = !expanded;
       resultEl.textContent = expanded ? run.result : run.result.slice(0, 300) + '…';
+    });
+  });
+
+  // Wire step toggle buttons
+  body.querySelectorAll('.task-steps-toggle').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const runId = btn.dataset.runId;
+      const container = body.querySelector('.task-steps-container[data-run-id="' + runId + '"]');
+      if (!container) return;
+      await _renderStepsTimeline(runId, container);
+      btn.textContent = container.dataset.loaded === 'true' ? 'Hide tool calls' : 'Show tool calls';
     });
   });
 }
