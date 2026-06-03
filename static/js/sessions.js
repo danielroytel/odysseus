@@ -1388,6 +1388,19 @@ export async function loadSessions() {
     }
     sessions = _normalizeSessionsList(fetched);
     _initLensTabs();
+    // Update task count badge on Tasks lens tab
+    const _taskCount = (fetched || []).filter(s => !s.archived && s.folder === 'Tasks').length;
+    const _tasksTab = document.getElementById('lens-tasks');
+    if (_tasksTab) {
+      const _existingBadge = _tasksTab.querySelector('.lens-badge');
+      if (_existingBadge) _existingBadge.remove();
+      if (_taskCount > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'lens-badge';
+        badge.textContent = _taskCount > 99 ? '99+' : _taskCount;
+        _tasksTab.appendChild(badge);
+      }
+    }
     renderSessionList();
 
     const sessionsSection = uiModule.el('sessions-section');

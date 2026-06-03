@@ -1384,6 +1384,16 @@ body.bg-pattern-sparkles {
       opacity: 1;
       border-bottom-color: var(--red);
     }
+    .lens-badge {
+      font-size: 8px;
+      background: var(--red);
+      color: var(--bg);
+      border-radius: 8px;
+      padding: 0 4px;
+      margin-left: 4px;
+      line-height: 14px;
+      vertical-align: middle;
+    }
     #session-select-all-dot {
       display: inline-block;
       position: relative;
