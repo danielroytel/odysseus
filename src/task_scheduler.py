@@ -1305,6 +1305,7 @@ class TaskScheduler:
                 endpoint_url=endpoint_url,
                 model=model,
                 owner=task.owner,
+                folder="Tasks",
                 created_at=_utcnow(),
                 updated_at=_utcnow(),
             )
@@ -1453,6 +1454,7 @@ class TaskScheduler:
                 endpoint_url=endpoint_url or "",
                 model=model_name or "",
                 owner=task.owner,
+                folder="Tasks",
                 created_at=_utcnow(),
                 updated_at=_utcnow(),
             )
@@ -1733,6 +1735,7 @@ class TaskScheduler:
                 endpoint_url=endpoint_url,
                 model=model,
                 owner=task.owner,
+                folder="Tasks",
                 created_at=_utcnow(),
                 updated_at=_utcnow(),
             )
