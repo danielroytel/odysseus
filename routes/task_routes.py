@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from core.database import SessionLocal, ScheduledTask, TaskRun
@@ -118,6 +119,7 @@ def _task_to_dict(t: ScheduledTask, include_last_run_result: bool = False) -> di
 
 
 def _run_to_dict(r: TaskRun) -> dict:
+    steps_raw = getattr(r, "steps", None)
     return {
         "id": r.id,
         "task_id": r.task_id,
@@ -128,6 +130,7 @@ def _run_to_dict(r: TaskRun) -> dict:
         "error": r.error,
         "tokens_used": r.tokens_used,
         "model": r.model,
+        "has_steps": bool(steps_raw and steps_raw.strip()),
     }
 
 
@@ -804,6 +807,27 @@ def setup_task_routes(task_scheduler) -> APIRouter:
                 .offset(offset).limit(limit).all()
             total = db.query(TaskRun).filter(TaskRun.task_id == task_id).count()
             return {"runs": [_run_to_dict(r) for r in runs], "total": total}
+        finally:
+            db.close()
+
+    @router.get("/runs/{run_id}/steps")
+    async def get_run_steps(run_id: str, request: Request):
+        """Return the tool-call execution steps for a single task run."""
+        db = SessionLocal()
+        try:
+            run = db.query(TaskRun).filter(TaskRun.id == run_id).first()
+            if not run:
+                return JSONResponse({"error": "Run not found"}, status_code=404)
+            steps_raw = getattr(run, "steps", None)
+            if not steps_raw:
+                return {"steps": [], "run_id": run_id}
+            try:
+                parsed = json.loads(steps_raw)
+                if isinstance(parsed, list):
+                    return {"steps": parsed, "run_id": run_id}
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return {"steps": [], "run_id": run_id}
         finally:
             db.close()
 

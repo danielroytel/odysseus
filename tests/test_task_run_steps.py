@@ -117,3 +117,43 @@ class TestStepsSerialization:
             if len(e.get("output", "")) > max_output_len:
                 e["output"] = e["output"][:max_output_len] + "...[truncated]"
         assert len(events[0]["output"]) <= max_output_len + 20
+
+
+class TestRunToDictSteps:
+    """Verify _run_to_dict includes steps info."""
+
+    def test_run_to_dict_no_steps(self):
+        from routes.task_routes import _run_to_dict
+
+        mock_run = MagicMock()
+        mock_run.id = "run-1"
+        mock_run.task_id = "task-1"
+        mock_run.started_at = None
+        mock_run.finished_at = None
+        mock_run.status = "success"
+        mock_run.result = "ok"
+        mock_run.error = None
+        mock_run.tokens_used = 100
+        mock_run.model = "test"
+        mock_run.steps = None
+        d = _run_to_dict(mock_run)
+        assert d["has_steps"] is False
+        assert "steps" not in d
+
+    def test_run_to_dict_with_steps(self):
+        from routes.task_routes import _run_to_dict
+
+        mock_run = MagicMock()
+        mock_run.id = "run-2"
+        mock_run.task_id = "task-1"
+        mock_run.started_at = None
+        mock_run.finished_at = None
+        mock_run.status = "success"
+        mock_run.result = "ok"
+        mock_run.error = None
+        mock_run.tokens_used = 100
+        mock_run.model = "test"
+        mock_run.steps = json.dumps([{"round": 1, "tool": "bash", "command": "ls", "output": "files", "exit_code": 0}])
+        d = _run_to_dict(mock_run)
+        assert d["has_steps"] is True
+        assert "steps" not in d
