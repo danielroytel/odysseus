@@ -22,6 +22,7 @@ const FOLDER_MAX_VISIBLE = 5;
 let _showAllSessions = false;
 let _expandedFolders = {};  // folderName -> true if "show more" clicked
 let _sortMode = Storage.get('odysseus-session-sort') || 'active'; // default to last active
+  let _activeLens = Storage.get('session-lens') || 'chats';
 let _autoCreateInProgress = false; // guard against recursive auto-create
 const _INCOGNITO_SESSIONS_KEY = 'ody-incognito-sessions'; // sessionStorage key for incognito session IDs
 const _isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -756,7 +757,17 @@ function _renderSessionListImpl() {
 
   // Get saved order from localStorage
   const savedOrder = Storage.get('session-order');
-  let orderedSessions = sessions.filter(s => !s.archived && s.folder !== 'Assistant' && !_isIncognitoSession(s.id) && (s.name || '').trim() !== 'Nobody' && (s.name || '').trim() !== 'Incognito');
+  let orderedSessions = sessions.filter(s => {
+    if (s.archived) return false;
+    if (_isIncognitoSession(s.id)) return false;
+    if ((s.name || '').trim() === 'Nobody' || (s.name || '').trim() === 'Incognito') return false;
+    // Lens filtering: show only sessions matching the active lens
+    if (_activeLens === 'tasks') {
+      return s.folder === 'Tasks';
+    }
+    // Default (chats): show everything EXCEPT Assistant and Tasks folders
+    return s.folder !== 'Assistant' && s.folder !== 'Tasks';
+  });
 
   if (savedOrder) {
     try {
@@ -1328,6 +1339,25 @@ function _initBulkSelect() {
   }
 }
 
+function _initLensTabs() {
+  const tabs = document.querySelectorAll('.lens-tab');
+  if (!tabs.length) return;
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      _activeLens = tab.dataset.lens;
+      Storage.set('session-lens', _activeLens);
+      document.querySelectorAll('.lens-tab').forEach(t => t.classList.toggle('active', t.dataset.lens === _activeLens));
+      const label = document.getElementById('chats-section-label');
+      if (label) label.textContent = _activeLens === 'tasks' ? 'Tasks' : 'Chats';
+      renderSessionList();
+    });
+  });
+  // Restore saved lens on load
+  document.querySelectorAll('.lens-tab').forEach(t => t.classList.toggle('active', t.dataset.lens === _activeLens));
+  const _initLabel = document.getElementById('chats-section-label');
+  if (_initLabel && _activeLens === 'tasks') _initLabel.textContent = 'Tasks';
+}
+
 function _animateSessionRowsRemoving(ids, selector) {
   const idSet = new Set((ids || []).map(id => String(id)));
   if (!idSet.size) return Promise.resolve();
@@ -1357,6 +1387,7 @@ export async function loadSessions() {
       fetched = await res.json();
     }
     sessions = _normalizeSessionsList(fetched);
+    _initLensTabs();
     renderSessionList();
 
     const sessionsSection = uiModule.el('sessions-section');
