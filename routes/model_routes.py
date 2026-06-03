@@ -1143,6 +1143,7 @@ def setup_model_routes(model_discovery):
                     "ping_error": (ping or {}).get("error") if ping else None,
                     "model_type": getattr(r, "model_type", None) or "llm",
                     "supports_tools": getattr(r, "supports_tools", None),
+                    "context_length": getattr(r, "context_length", None),
                 })
             return results
         finally:
@@ -1548,6 +1549,9 @@ def setup_model_routes(model_discovery):
                     _new_base = _normalize_base(_new_base)
                     if _new_base:
                         ep.base_url = _new_base
+                if "context_length" in body:
+                    v = body["context_length"]
+                    ep.context_length = int(v) if isinstance(v, (int, str)) and str(v).strip().isdigit() and int(v) > 0 else None
             else:
                 ep.is_enabled = not ep.is_enabled
             db.commit()
@@ -1560,6 +1564,7 @@ def setup_model_routes(model_discovery):
                 "name": ep.name,
                 "model_type": ep.model_type,
                 "base_url": ep.base_url,
+                "context_length": ep.context_length,
             }
         finally:
             db.close()

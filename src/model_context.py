@@ -166,13 +166,45 @@ KNOWN_CONTEXT_WINDOWS = {
 _context_cache: Dict[str, int] = {}
 
 
+def _query_endpoint_context_override(endpoint_url: str) -> Optional[int]:
+    """Check if a ModelEndpoint has a context_length override set."""
+    try:
+        from core.database import SessionLocal, ModelEndpoint
+    except Exception:
+        return None
+    from src.endpoint_resolver import normalize_base
+    db = SessionLocal()
+    try:
+        normalized = normalize_base(endpoint_url)
+        ep = db.query(ModelEndpoint).filter(
+            ModelEndpoint.base_url.contains(normalized.rstrip("/"))
+        ).first()
+        if ep and ep.context_length and ep.context_length > 0:
+            return ep.context_length
+    except Exception:
+        pass
+    finally:
+        db.close()
+    return None
+
+
 def get_context_length(endpoint_url: str, model: str) -> int:
     """Get the context window size for a model.
 
-    Queries /v1/models on the endpoint and looks for context_length
-    or context_window fields. Caches result per model ID.
-    Falls back to DEFAULT_CONTEXT if unavailable.
+    Resolution order:
+    1. Per-endpoint override in ModelEndpoint.context_length (DB)
+    2. /v1/models API query or llama.cpp /slots
+    3. KNOWN_CONTEXT_WINDOWS dict (substring match)
+    4. DEFAULT_CONTEXT fallback
+
+    Caches result per model ID for remote endpoints.
     """
+    # 1. Check per-endpoint DB override first
+    db_override = _query_endpoint_context_override(endpoint_url)
+    if db_override:
+        logger.info(f"Context length for {model}: {db_override} (endpoint override)")
+        return db_override
+
     is_local = _is_local_endpoint(endpoint_url)
     if not is_local and model in _context_cache:
         return _context_cache[model]

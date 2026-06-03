@@ -341,6 +341,10 @@ class ModelEndpoint(TimestampMixin, Base):
     # can be toggled per-endpoint in the UI. NULL = unknown, falls
     # back to the model-name keyword heuristic in agent_loop.py.
     supports_tools = Column(Boolean, nullable=True, default=None)
+    # Override context window for models on this endpoint. NULL = auto-detect
+    # from /v1/models or KNOWN_CONTEXT_WINDOWS. Set to an integer (e.g. 131072)
+    # to pin a specific context size regardless of API reports.
+    context_length = Column(Integer, nullable=True)
     # Per-user ownership. NULL = legacy/shared (visible to every user) — this
     # is the historical default. When non-null, the model picker only shows
     # the endpoint to that user (admins always see everything).
