@@ -1552,6 +1552,12 @@ def setup_model_routes(model_discovery):
                 if "context_length" in body:
                     v = body["context_length"]
                     ep.context_length = int(v) if isinstance(v, (int, str)) and str(v).strip().isdigit() and int(v) > 0 else None
+                    # Invalidate context override cache so the new value is picked up immediately
+                    try:
+                        from src.model_context import invalidate_endpoint_context_cache
+                        invalidate_endpoint_context_cache()
+                    except Exception:
+                        pass
             else:
                 ep.is_enabled = not ep.is_enabled
             db.commit()

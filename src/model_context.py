@@ -6,6 +6,7 @@ Provides token estimation for context usage tracking.
 """
 
 import logging
+import time
 from typing import Dict, List, Optional
 
 from urllib.parse import urlparse
@@ -165,27 +166,53 @@ KNOWN_CONTEXT_WINDOWS = {
 # ---------------------------------------------------------------------------
 _context_cache: Dict[str, int] = {}
 
+# Endpoint override cache: {normalized_url: (value, timestamp)}
+_endpoint_ctx_cache: Dict[str, tuple] = {}
+_ENDPOINT_CTX_TTL = 300  # seconds — admin changes propagate within 5 min
+
+
+def invalidate_endpoint_context_cache():
+    """Clear the endpoint context override cache. Call when admin updates an endpoint."""
+    _endpoint_ctx_cache.clear()
+
 
 def _query_endpoint_context_override(endpoint_url: str) -> Optional[int]:
-    """Check if a ModelEndpoint has a context_length override set."""
+    """Check if a ModelEndpoint has a context_length override set.
+
+    Results are cached for _ENDPOINT_CTX_TTL seconds to avoid a DB query
+    on every get_context_length call. Cache is invalidated when the admin
+    updates an endpoint via the PATCH route.
+    """
+    from src.endpoint_resolver import normalize_base
+    normalized = normalize_base(endpoint_url).rstrip("/")
+
+    # Check cache
+    now = time.time()
+    cached = _endpoint_ctx_cache.get(normalized)
+    if cached is not None:
+        value, ts = cached
+        if now - ts < _ENDPOINT_CTX_TTL:
+            return value if value is not None else None
+        del _endpoint_ctx_cache[normalized]
+
+    # Query DB
     try:
         from core.database import SessionLocal, ModelEndpoint
     except Exception:
         return None
-    from src.endpoint_resolver import normalize_base
     db = SessionLocal()
     try:
-        normalized = normalize_base(endpoint_url)
         ep = db.query(ModelEndpoint).filter(
-            ModelEndpoint.base_url.contains(normalized.rstrip("/"))
+            ModelEndpoint.base_url.contains(normalized)
         ).first()
-        if ep and ep.context_length and ep.context_length > 0:
-            return ep.context_length
+        value = ep.context_length if ep and ep.context_length and ep.context_length > 0 else None
     except Exception:
-        pass
+        value = None
     finally:
         db.close()
-    return None
+
+    _endpoint_ctx_cache[normalized] = (value, now)
+    return value
 
 
 def get_context_length(endpoint_url: str, model: str) -> int:
