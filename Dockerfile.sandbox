@@ -1,0 +1,81 @@
+# Odysseus Polyglot Sandbox Image
+# Supports: Python, Node.js, Rust, Go, Bun
+# Package managers: pip, uv, npm, npx, nvm, corepack, bun, cargo, rustup, go mod, gh
+#
+# Build: docker build -f Dockerfile.sandbox -t odysseus/sandbox:latest .
+# Run (test): docker run --rm odysseus/sandbox:latest python3 --version
+
+# ---- Stage 1: Python ----
+FROM python:3.12-slim AS python-stage
+
+# ---- Stage 2: Node.js ----
+FROM node:22-slim AS node-stage
+
+# ---- Stage 3: Go ----
+FROM golang:1.23-alpine AS go-stage
+
+# ---- Final: Polyglot Sandbox ----
+FROM python:3.12-slim
+
+# --- System packages ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl wget jq ripgrep fd-find bat build-essential pkg-config \
+    libssl-dev ca-certificates gnupg unzip && \
+    rm -rf /var/lib/apt/lists/*
+
+# --- Node.js (from node-stage) ---
+COPY --from=node-stage /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-stage /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s /usr/local/lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
+
+# --- uv (Python package manager) ---
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# --- Go (from go-stage) ---
+COPY --from=go-stage /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# --- Bun (JavaScript runtime) ---
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+# --- GitHub CLI (gh) ---
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Create non-root user ---
+RUN useradd -m -u 1000 sandbox && \
+    mkdir -p /home/sandbox/.cargo /home/sandbox/.rustup \
+              /home/sandbox/.local /home/sandbox/.nvm \
+              /home/sandbox/.bun && \
+    chown -R sandbox:sandbox /home/sandbox
+
+# --- User-level toolchains ---
+USER sandbox
+WORKDIR /workspace
+
+# Rust (via rustup for sandbox user)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/home/sandbox/.cargo/bin:${PATH}"
+
+# nvm for sandbox user
+ENV NVM_DIR=/home/sandbox/.nvm
+RUN mkdir -p $NVM_DIR && \
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+# uv configuration for sandbox user
+ENV UV_CACHE_DIR=/home/sandbox/.cache/uv
+
+# --- Verify all toolchains ---
+RUN python3 --version && pip --version && uv --version \
+    && node --version && npm --version && npx --version \
+    && go version && rustc --version && cargo --version \
+    && git --version && rg --version && jq --version \
+    && gh --version
