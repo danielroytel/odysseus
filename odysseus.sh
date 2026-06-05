@@ -40,6 +40,7 @@ LLM_FLASH_ATTN="${LLM_FLASH_ATTN:-auto}"         # auto|on|off — flash attenti
 LLM_CACHE_TYPE_K="${LLM_CACHE_TYPE_K:-q8_0}"      # f32|f16|bf16|q8_0|q5_1 — KV cache K dtype
 LLM_CACHE_TYPE_V="${LLM_CACHE_TYPE_V:-q5_1}"      # f32|f16|bf16|q8_0|q5_1 — KV cache V dtype
 LLM_FIT="${LLM_FIT:-}"                            # "on" to auto-shrink ctx to fit VRAM (unset = use full ctx with KV spill to RAM)
+LLM_CACHE_REUSE="${LLM_CACHE_REUSE:-64}"           # min chunk for KV cache reuse via shifting (0=off)
 
 # Auto-detect GGUF model from HuggingFace cache
 _llm_find_gguf() {
@@ -230,6 +231,7 @@ start_llm() {
         --cache-type-v "$LLM_CACHE_TYPE_V"
     )
     [[ -n "$LLM_FIT" ]] && cmd+=(--fit "$LLM_FIT")
+    [[ -n "$LLM_CACHE_REUSE" && "$LLM_CACHE_REUSE" != "0" ]] && cmd+=(--cache-reuse "$LLM_CACHE_REUSE")
     nohup "${cmd[@]}" >> "$DIR/llm.log" 2>&1 &
 
     # Wait for server to be ready (model loading can take a while)
