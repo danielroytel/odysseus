@@ -6,6 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch, call, mock_open
 from src.sandbox import SandboxError, SandboxConfig, SandboxContainer, SandboxManager
 
 
+def _register_container(manager, session_id, container):
+    """Register a container in the manager with proper workspace mapping."""
+    wid = container.workspace_id
+    manager._containers[wid] = container
+    manager._session_to_workspace[session_id] = wid
+    manager._references.setdefault(wid, set()).add(session_id)
+
+
 def _mock_process(stdout=b"", stderr=b"", returncode=0):
     """Create a mock subprocess.Process for _docker_cmd (uses .communicate())."""
     proc = MagicMock()
@@ -147,7 +155,7 @@ class TestCreateContainer:
             container = await manager._create_container("test-session", "/workspace", config)
 
             assert container.container_id == "abc123"
-            assert container.session_id == "test-session"
+            assert container.workspace_id == "test-session"
             assert container.workspace_dir == "/workspace"
             assert container.image == "python:3.12-slim"
             assert container.container_workspace == "/workspace"
@@ -279,7 +287,7 @@ class TestGetOrCreate:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -287,12 +295,12 @@ class TestGetOrCreate:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
-        result = await manager.get_or_create("test-session", "/workspace", config)
+        result = await manager.get_or_create("test-session", "/workspace", config, workspace_id="test-session")
 
         assert result.container_id == "abc123"
-        assert result.session_id == "test-session"
+        assert result.workspace_id == "test-session"
 
     @pytest.mark.asyncio
     async def test_create_new(self):
@@ -308,9 +316,9 @@ class TestGetOrCreate:
             container = await manager.get_or_create("test-session", "/workspace", config)
 
             assert container.container_id == "abc123"
-            assert container.session_id == "test-session"
+            assert container.workspace_id == "_session_test-session"
             assert container.image == "test:latest"
-            assert "test-session" in manager._containers
+            assert "_session_test-session" in manager._containers
 
     @pytest.mark.asyncio
     async def test_recreate_on_image_change(self):
@@ -323,7 +331,7 @@ class TestGetOrCreate:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:v1",
@@ -331,19 +339,19 @@ class TestGetOrCreate:
             last_used_at=time.time(),
             config=old_config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         cleanup_called = []
 
-        async def mock_cleanup(session_id):
-            cleanup_called.append(session_id)
+        async def mock_cleanup_workspace(workspace_id):
+            cleanup_called.append(workspace_id)
 
-        with patch.object(manager, "cleanup", side_effect=mock_cleanup):
+        with patch.object(manager, "_cleanup_workspace", side_effect=mock_cleanup_workspace):
             with patch("asyncio.create_subprocess_exec", return_value=_mock_process(
                 stdout=b"xyz789\n",
                 returncode=0
             )):
-                result = await manager.get_or_create("test-session", "/workspace", new_config)
+                result = await manager.get_or_create("test-session", "/workspace", new_config, workspace_id="test-session")
 
                 assert cleanup_called == ["test-session"]
                 assert result.container_id == "xyz789"
@@ -374,7 +382,7 @@ class TestExecCommand:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -382,7 +390,7 @@ class TestExecCommand:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         calls = []
 
@@ -409,7 +417,7 @@ class TestExecCommand:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -417,7 +425,7 @@ class TestExecCommand:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         with patch("asyncio.create_subprocess_exec", return_value=_mock_process(
             stdout=b"false",
@@ -446,7 +454,7 @@ class TestExecCommand:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -454,7 +462,7 @@ class TestExecCommand:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         def mock_create(*args, **kwargs):
             if "inspect" in args:
@@ -484,7 +492,7 @@ class TestExecCommand:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -492,7 +500,7 @@ class TestExecCommand:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         calls = []
 
@@ -527,7 +535,7 @@ class TestExecCommand:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -535,7 +543,7 @@ class TestExecCommand:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         calls = []
 
@@ -572,7 +580,7 @@ class TestReadWriteFile:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -580,7 +588,7 @@ class TestReadWriteFile:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         def mock_create(*args, **kwargs):
             if "inspect" in args:
@@ -602,7 +610,7 @@ class TestReadWriteFile:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -610,7 +618,7 @@ class TestReadWriteFile:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         def mock_create(*args, **kwargs):
             if "inspect" in args:
@@ -642,7 +650,7 @@ class TestReadWriteFile:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -650,7 +658,7 @@ class TestReadWriteFile:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         exec_calls = []
 
@@ -692,7 +700,7 @@ class TestCleanup:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -700,7 +708,7 @@ class TestCleanup:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         docker_calls = []
 
@@ -734,7 +742,7 @@ class TestCleanup:
         # Add containers with different last_used_at times
         idle_container = SandboxContainer(
             container_id="idle123",
-            session_id="idle-session",
+            workspace_id="idle-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -745,7 +753,7 @@ class TestCleanup:
 
         active_container = SandboxContainer(
             container_id="active123",
-            session_id="active-session",
+            workspace_id="active-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -754,8 +762,10 @@ class TestCleanup:
             config=config
         )
 
-        manager._containers["idle-session"] = idle_container
-        manager._containers["active-session"] = active_container
+        _register_container(manager, "idle-session", idle_container)
+        _register_container(manager, "active-session", active_container)
+        # Simulate idle container having no active sessions
+        manager._references["idle-session"] = set()
 
         docker_calls = []
 
@@ -782,7 +792,7 @@ class TestCleanup:
         for i in range(3):
             container = SandboxContainer(
                 container_id=f"container{i}",
-                session_id=f"session{i}",
+                workspace_id=f"session{i}",
                 workspace_dir="/workspace",
                 container_workspace="/workspace",
                 image="test:latest",
@@ -790,7 +800,7 @@ class TestCleanup:
                 last_used_at=now,
                 config=config
             )
-            manager._containers[f"session{i}"] = container
+            _register_container(manager, f"session{i}", container)
 
         async def mock_exec(*args, **kwargs):
             return _mock_process(returncode=0)
@@ -820,7 +830,7 @@ class TestCleanup:
         config = SandboxConfig()
         container = SandboxContainer(
             container_id="tracked123",
-            session_id="tracked-session",
+            workspace_id="tracked-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -828,7 +838,7 @@ class TestCleanup:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["tracked-session"] = container
+        _register_container(manager, "tracked-session", container)
 
         with patch("asyncio.create_subprocess_exec", side_effect=mock_create):
             count = await manager.cleanup_orphans()
@@ -869,7 +879,7 @@ class TestFailClosed:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -877,7 +887,7 @@ class TestFailClosed:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         def mock_create(*args, **kwargs):
             if "inspect" in args:
@@ -912,7 +922,7 @@ class TestFailClosed:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -920,7 +930,7 @@ class TestFailClosed:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         with patch("asyncio.create_subprocess_exec", return_value=_mock_process(
             returncode=1,
@@ -945,7 +955,7 @@ class TestProgressCallback:
 
         container = SandboxContainer(
             container_id="abc123",
-            session_id="test-session",
+            workspace_id="test-session",
             workspace_dir="/workspace",
             container_workspace="/workspace",
             image="test:latest",
@@ -953,7 +963,7 @@ class TestProgressCallback:
             last_used_at=time.time(),
             config=config
         )
-        manager._containers["test-session"] = container
+        _register_container(manager, "test-session", container)
 
         progress_calls = []
 
@@ -1026,7 +1036,7 @@ class TestIntegration:
 
             # Create container
             container = await manager.get_or_create(session_id, workspace, config)
-            assert container.session_id == session_id
+            assert container.workspace_id == f"_session_{session_id}"
             assert container.container_id
 
             # Exec command

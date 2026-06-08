@@ -998,6 +998,19 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
+                    # Resolve workspace_id and sandbox_manager for workspace-shared containers
+                    _ws_id = None
+                    _sandbox_mgr = getattr(request.app.state, "sandbox_manager", None)
+                    try:
+                        from core.database import Session as _DBS, SessionLocal as _SL
+                        _db = _SL()
+                        _db_sess = _db.query(_DBS.workspace_id).filter(_DBS.id == session).first()
+                        if _db_sess and _db_sess.workspace_id:
+                            _ws_id = _db_sess.workspace_id
+                        _db.close()
+                    except Exception:
+                        pass
+
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
                         sess.model,
@@ -1015,6 +1028,8 @@ def setup_chat_routes(
                         owner=_user,
                         fallbacks=_fallback_candidates,
                         workspace=workspace or None,
+                        sandbox_manager=_sandbox_mgr,
+                        workspace_id=_ws_id,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

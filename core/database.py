@@ -128,6 +128,7 @@ class Session(TimestampMixin, Base):
     total_output_tokens = Column(Integer, default=0)
     mode = Column(String, nullable=True)  # 'agent', 'chat', or 'research'
     crew_member_id = Column(String, nullable=True)  # links to crew_members.id
+    workspace_id = Column(String, nullable=True, index=True)  # links to workspaces.id
 
     # Relationship to chat messages
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -156,7 +157,39 @@ class Session(TimestampMixin, Base):
             'total_input_tokens': self.total_input_tokens or 0,
             'total_output_tokens': self.total_output_tokens or 0,
             'crew_member_id': self.crew_member_id,
+            'workspace_id': self.workspace_id,
         }
+
+
+class Workspace(TimestampMixin, Base):
+    """Named workspace: a shared sandbox container that multiple sessions can use."""
+    __tablename__ = "workspaces"
+
+    id = Column(String, primary_key=True, index=True)           # UUID
+    name = Column(String, nullable=False)                        # User-facing name
+    path = Column(String, nullable=False)                        # Filesystem path (data/workspaces/{id})
+    owner = Column(String, nullable=True, index=True)            # username; null = legacy/shared
+    description = Column(String, nullable=True)
+
+    # Sandbox overrides (null = use system defaults)
+    sandbox_image = Column(String, nullable=True)
+    sandbox_memory = Column(String, nullable=True)
+    sandbox_network = Column(Boolean, nullable=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'path': self.path,
+            'owner': self.owner,
+            'description': self.description,
+            'sandbox_image': self.sandbox_image,
+            'sandbox_memory': self.sandbox_memory,
+            'sandbox_network': self.sandbox_network,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
 
 class ChatMessage(Base):
     """
@@ -1576,6 +1609,48 @@ def _migrate_seed_email_account():
         logging.getLogger(__name__).warning(f"seed email account migration: {e}")
 
 
+def _migrate_create_workspaces_table():
+    """Create workspaces table if it doesn't exist."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS workspaces (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    owner TEXT,
+                    description TEXT,
+                    sandbox_image TEXT,
+                    sandbox_memory TEXT,
+                    sandbox_network BOOLEAN,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_workspaces_owner ON workspaces(owner)"
+            ))
+            conn.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"workspaces table creation: {e}")
+
+
+def _migrate_add_workspace_id_column():
+    """Add workspace_id column to sessions table if it doesn't exist."""
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(sessions)"))]
+            if "workspace_id" not in cols:
+                conn.execute(text("ALTER TABLE sessions ADD COLUMN workspace_id TEXT"))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_sessions_workspace_id ON sessions(workspace_id)"
+                ))
+                conn.commit()
+                logging.getLogger(__name__).info("Added workspace_id column to sessions")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"workspace_id migration: {e}")
+
+
 # WARNING: Foreign-key enforcement is enabled globally for all SQLite connections.
 # Any future migrations or schema changes that temporarily violate foreign-key
 # constraints will fail. To perform such operations, foreign_keys must be
@@ -1625,6 +1700,35 @@ def init_db():
     _migrate_encrypt_email_passwords()
     _migrate_encrypt_signatures()
     _migrate_encrypt_endpoint_keys()
+    _migrate_backfill_task_folders()
+    _migrate_create_workspaces_table()
+    _migrate_add_workspace_id_column()
+
+
+def _migrate_backfill_task_folders():
+    """Backfill folder='Tasks' on pre-existing task/research sessions.
+
+    Sessions created by the task scheduler (LLM tasks, action tasks, research
+    runs) now set folder='Tasks' at creation time.  This migration tags any
+    older sessions that predate that assignment.  Idempotent — only touches
+    rows where folder is NULL or empty and the title matches known prefixes.
+    """
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(sessions)"))]
+            if "folder" not in cols:
+                return
+            res = conn.execute(text(
+                "UPDATE sessions SET folder = 'Tasks' "
+                "WHERE (folder IS NULL OR folder = '') "
+                "AND (name LIKE '[Task] %' OR name LIKE '[Research] %')"
+            ))
+            conn.commit()
+            if res.rowcount:
+                logging.getLogger(__name__).info(
+                    f"Backfilled folder='Tasks' on {res.rowcount} task/research sessions")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"task folder backfill: {e}")
 
 
 def _migrate_add_email_smtp_security():

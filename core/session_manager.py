@@ -117,6 +117,7 @@ class SessionManager:
             history=[],
             owner=getattr(db_session, "owner", None),
             is_important=getattr(db_session, "is_important", False) or False,
+            workspace_id=getattr(db_session, "workspace_id", None),
         )
         session.message_count = getattr(db_session, "message_count", 0) or 0
         return session
@@ -175,6 +176,7 @@ class SessionManager:
             history=history,
             owner=getattr(db_session, 'owner', None),
             is_important=getattr(db_session, 'is_important', False) or False,
+            workspace_id=getattr(db_session, 'workspace_id', None),
         )
 
         session.message_count = getattr(db_session, 'message_count', len(history))
@@ -450,7 +452,8 @@ class SessionManager:
         endpoint_url: str,
         model: str,
         rag: bool = False,
-        owner: str = None
+        owner: str = None,
+        workspace_id: str = None
     ) -> Session:
         """Create a new session and save to database."""
         db = SessionLocal()
@@ -463,6 +466,7 @@ class SessionManager:
                 rag=rag,
                 headers={},
                 owner=owner,
+                workspace_id=workspace_id,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )
@@ -477,6 +481,7 @@ class SessionManager:
                 rag=rag,
                 headers={},
                 owner=owner,
+                workspace_id=workspace_id,
             )
 
             self.sessions[session_id] = session

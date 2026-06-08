@@ -2413,7 +2413,7 @@ function initSandboxToggles() {
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initSandboxToggles, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initSandboxToggles, initWorkspaceControls, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }
@@ -2441,6 +2441,9 @@ export function open(tab) {
   if (tab === 'sandbox') {
     loadSandboxSettings();
   }
+  if (tab === 'workspaces') {
+    loadWorkspaces();
+  }
   settingsModule.open(tab || 'services');
 }
 
@@ -2448,5 +2451,191 @@ export function close() {
   settingsModule.close();
 }
 
-const adminModule = { open, close, _initData, loadSandboxSettings, get _initialized() { return initialized; } };
+/* ═══════════════════════════════════════════
+   WORKSPACES TAB
+   ═══════════════════════════════════════════ */
+
+let workspacesLoaded = false;
+
+async function loadWorkspaces() {
+  const listDiv = modalEl.querySelector('[data-workspace-list]');
+  if (!listDiv) return;
+  try {
+    const res = await fetch('/api/workspace', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(res.status);
+    const workspaces = await res.json();
+    renderWorkspaceList(workspaces);
+    workspacesLoaded = true;
+  } catch (e) {
+    listDiv.innerHTML = '<div class="admin-toggle-sub" style="padding:12px;color:var(--color-error)">Failed to load workspaces</div>';
+  }
+}
+
+function renderWorkspaceList(workspaces) {
+  const listDiv = modalEl.querySelector('[data-workspace-list]');
+  if (!listDiv) return;
+  if (!workspaces.length) {
+    listDiv.innerHTML = '<div class="admin-toggle-sub" style="padding:12px">No workspaces yet. Create one to share a sandbox across sessions.</div>';
+    return;
+  }
+  listDiv.innerHTML = '';
+  workspaces.forEach(ws => {
+    const card = document.createElement('div');
+    card.className = 'admin-card';
+    card.dataset.workspaceCardId = ws.id;
+    const desc = ws.description ? `<div class="admin-toggle-sub">${esc(ws.description)}</div>` : '';
+    const sessions = ws.session_count > 0
+      ? `<span style="color:var(--green);font-size:10px;margin-left:6px">${ws.session_count} session${ws.session_count > 1 ? 's' : ''}</span>`
+      : '<span style="color:var(--color-muted);font-size:10px;margin-left:6px">no sessions</span>';
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:13px;font-weight:600">${esc(ws.name)}</div>
+          ${desc}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span data-workspace-status="${esc(ws.id)}" style="font-size:10px;color:var(--color-muted)">checking...</span>
+          <button data-workspace-start="${esc(ws.id)}" class="admin-btn-add" style="font-size:10px;display:none">Start</button>
+          <button data-workspace-stop="${esc(ws.id)}" class="admin-btn-sm" style="font-size:10px;display:none">Stop</button>
+          <button class="admin-btn-delete" data-workspace-delete="${esc(ws.id)}" style="font-size:11px;white-space:nowrap">Delete</button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;margin-top:6px;font-size:11px">
+        <span style="color:var(--color-muted)">ID: ${esc(ws.id).substring(0,8)}...</span>
+        ${sessions}
+      </div>
+    `;
+
+    // Start button
+    const startBtn = card.querySelector('[data-workspace-start]');
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      startBtn.textContent = 'Starting...';
+      try {
+        const res = await fetch('/api/workspace/' + ws.id + '/start', { method: 'POST', credentials: 'same-origin' });
+        if (!res.ok) throw new Error(res.status);
+        uiModule.showToast('Container started');
+        _updateContainerStatus(ws.id);
+      } catch (e) {
+        uiModule.showToast('Failed to start container');
+        startBtn.disabled = false;
+        startBtn.textContent = 'Start';
+      }
+    });
+
+    // Stop button
+    const stopBtn = card.querySelector('[data-workspace-stop]');
+    stopBtn.addEventListener('click', async () => {
+      stopBtn.disabled = true;
+      stopBtn.textContent = 'Stopping...';
+      try {
+        const res = await fetch('/api/workspace/' + ws.id + '/stop', { method: 'POST', credentials: 'same-origin' });
+        if (!res.ok) throw new Error(res.status);
+        uiModule.showToast('Container stopped');
+        _updateContainerStatus(ws.id);
+      } catch (e) {
+        uiModule.showToast('Failed to stop container');
+        stopBtn.disabled = false;
+        stopBtn.textContent = 'Stop';
+      }
+    });
+
+    // Delete button
+    const delBtn = card.querySelector('[data-workspace-delete]');
+    delBtn.addEventListener('click', async () => {
+      if (!confirm('Delete workspace "' + ws.name + '"? All sessions will be detached.')) return;
+      delBtn.disabled = true;
+      try {
+        await fetch('/api/workspace/' + ws.id, { method: 'DELETE', credentials: 'same-origin' });
+        uiModule.showToast('Workspace deleted');
+        loadWorkspaces();
+      } catch (e) {
+        uiModule.showToast('Failed to delete workspace');
+        delBtn.disabled = false;
+      }
+    });
+
+    listDiv.appendChild(card);
+    // Fetch container status
+    _updateContainerStatus(ws.id);
+  });
+}
+
+async function _updateContainerStatus(wsId) {
+  const statusEl = modalEl.querySelector(`[data-workspace-status="${wsId}"]`);
+  const startBtn = modalEl.querySelector(`[data-workspace-start="${wsId}"]`);
+  const stopBtn = modalEl.querySelector(`[data-workspace-stop="${wsId}"]`);
+  if (!statusEl) return;
+  try {
+    const res = await fetch('/api/workspace/' + wsId + '/status', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    if (data.status === 'running') {
+      statusEl.textContent = 'Running (' + data.container_id + ')';
+      statusEl.style.color = 'var(--green)';
+      startBtn.style.display = 'none';
+      stopBtn.style.display = '';
+    } else {
+      statusEl.textContent = 'Stopped';
+      statusEl.style.color = 'var(--color-muted)';
+      startBtn.style.display = '';
+      stopBtn.style.display = 'none';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Unknown';
+    statusEl.style.color = 'var(--color-muted)';
+  }
+}
+
+function initWorkspaceControls() {
+  const createBtn = modalEl.querySelector('[data-workspace-create]');
+  const createForm = modalEl.querySelector('[data-workspace-create-form]');
+  const cancelBtn = modalEl.querySelector('[data-workspace-create-cancel]');
+  const submitBtn = modalEl.querySelector('[data-workspace-create-submit]');
+  const nameInput = modalEl.querySelector('[data-workspace-name]');
+  const descInput = modalEl.querySelector('[data-workspace-desc]');
+  const refreshBtn = modalEl.querySelector('[data-workspace-refresh]');
+
+  if (!createBtn) return;
+
+  createBtn.addEventListener('click', () => {
+    createForm.classList.toggle('hidden');
+    if (!createForm.classList.contains('hidden')) nameInput.focus();
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    createForm.classList.add('hidden');
+    nameInput.value = '';
+    descInput.value = '';
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    submitBtn.disabled = true;
+    try {
+      await fetch('/api/workspace', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: descInput.value.trim() || null }),
+      });
+      uiModule.showToast('Workspace created');
+      nameInput.value = '';
+      descInput.value = '';
+      createForm.classList.add('hidden');
+      loadWorkspaces();
+    } catch (e) {
+      uiModule.showToast('Failed to create workspace');
+    }
+    submitBtn.disabled = false;
+  });
+
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitBtn.click(); });
+  descInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitBtn.click(); });
+
+  refreshBtn.addEventListener('click', () => loadWorkspaces());
+}
+
+const adminModule = { open, close, _initData, loadSandboxSettings, loadWorkspaces, get _initialized() { return initialized; } };
 export default adminModule;

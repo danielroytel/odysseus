@@ -1394,6 +1394,10 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             <span>Sandbox</span>
           </button>
+          <button class="settings-nav-item admin-only" data-settings-tab="workspaces">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+            <span>Workspaces</span>
+          </button>
           <button class="settings-nav-item admin-only" data-settings-tab="system">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             <span>System</span>
@@ -2350,6 +2354,42 @@
             </div>
 
             <button data-sandbox-refresh class="admin-btn-sm" style="font-size:11px;margin-top:6px">Refresh</button>
+          </div>
+        </div>
+
+        <!-- ═══ WORKSPACES TAB ═══ -->
+        <div data-settings-panel="workspaces" class="hidden">
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>Named Workspaces</h2>
+            <div class="admin-toggle-sub">Shared sandbox environments that persist across chat sessions. Multiple chats can share the same workspace container.</div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button data-workspace-create class="admin-btn-add" style="font-size:11px">New Workspace</button>
+              <button data-workspace-refresh class="admin-btn-sm" style="font-size:11px">Refresh</button>
+            </div>
+          </div>
+
+          <!-- Create form (hidden by default) -->
+          <div class="admin-card hidden" data-workspace-create-form>
+            <h2>Create Workspace</h2>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label">Name</label>
+                <input type="text" data-workspace-name class="settings-input" placeholder="My Project" style="flex:1;padding:5px 8px;font-family:inherit;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--fg)">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Description</label>
+                <input type="text" data-workspace-desc class="settings-input" placeholder="Optional description" style="flex:1;padding:5px 8px;font-family:inherit;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--fg)">
+              </div>
+              <div style="display:flex;gap:8px;margin-top:6px">
+                <button data-workspace-create-submit class="admin-btn-add" style="font-size:11px">Create</button>
+                <button data-workspace-create-cancel class="admin-btn-sm" style="font-size:11px">Cancel</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Workspace list -->
+          <div data-workspace-list>
+            <div class="admin-toggle-sub" style="padding:12px">Loading...</div>
           </div>
         </div>
 

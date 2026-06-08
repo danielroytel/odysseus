@@ -1392,6 +1392,7 @@ async def stream_agent_loop(
     _is_teacher_run: bool = False,
     sandbox_enabled: bool = False,
     sandbox_manager = None,
+    workspace_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -2220,6 +2221,8 @@ async def stream_agent_loop(
                         owner=owner,
                         progress_cb=_push_progress,
                         workspace=workspace,
+                        sandbox_manager=sandbox_manager,
+                        workspace_id=workspace_id,
                     )
                 finally:
                     # Sentinel so the drainer knows to stop.

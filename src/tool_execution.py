@@ -577,11 +577,14 @@ async def _call_mcp_tool(
     content: str,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
+    sandbox_manager: Optional[Any] = None,
+    workspace_id: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict:
     """Route a legacy tool call through the MCP manager, with direct fallbacks."""
     mcp = get_mcp_manager()
     if not mcp:
-        return await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace) or {"error": f"MCP manager not available for tool '{tool}'", "exit_code": 1}
+        return await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace, sandbox_manager=sandbox_manager, workspace_id=workspace_id, session_id=session_id) or {"error": f"MCP manager not available for tool '{tool}'", "exit_code": 1}
 
     server_id, tool_name = _MCP_TOOL_MAP[tool]
     qualified = f"mcp__{server_id}__{tool_name}"
@@ -590,7 +593,7 @@ async def _call_mcp_tool(
 
     # If MCP server not connected, try direct fallback
     if isinstance(result, dict) and result.get("exit_code") == 1 and "not connected" in result.get("error", ""):
-        fallback = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace)
+        fallback = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace, sandbox_manager=sandbox_manager, workspace_id=workspace_id, session_id=session_id)
         if fallback:
             return fallback
 
@@ -618,6 +621,9 @@ async def _direct_fallback(
     content: str,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
+    sandbox_manager: Optional[Any] = None,
+    workspace_id: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Optional[Dict]:
     """In-process execution path for the eight tools that used to live as
     stdio MCP servers under mcp_servers/. Those servers were deleted in
@@ -628,14 +634,48 @@ async def _direct_fallback(
     are still running, with `{elapsed_s, tail}` payloads. Other tools
     ignore it.
 
-    `sandbox_enabled` and `sandbox_manager` route bash/python/read_file/write_file
-    through the sandbox when enabled.
+    `sandbox_manager` routes bash/python/read_file/write_file through the
+    Docker sandbox when provided. `workspace_id` identifies the workspace
+    for shared-container lookup.
     """
     import json as _json
 
     # --- Sandbox routing ---
-    if sandbox_enabled and sandbox_manager is not None:
+    if sandbox_manager is not None:
         from src.sandbox import SandboxError
+
+        # Ensure the session has a registered container.  The first tool call
+        # for a session attached to a named workspace won't have a container
+        # yet — lazily create one via get_or_create().
+        if session_id and session_id not in sandbox_manager._session_to_workspace:
+            # Determine workspace directory and workspace_id
+            _sandbox_wid = workspace_id
+            _sandbox_dir = workspace or "."
+            if _sandbox_wid:
+                # Named workspace — resolve its directory from the DB
+                try:
+                    from core.database import SessionLocal, Workspace as DbWorkspace
+                    _db = SessionLocal()
+                    _ws_row = _db.query(DbWorkspace).filter(DbWorkspace.id == _sandbox_wid).first()
+                    if _ws_row and _ws_row.path:
+                        _sandbox_dir = _ws_row.path
+                    _db.close()
+                except Exception:
+                    pass
+            # Build config from saved settings
+            from src.settings import get_setting, SANDBOX_DEFAULTS
+            from src.sandbox import SandboxConfig
+            _config = SandboxConfig(
+                image=get_setting("sandbox_image", SANDBOX_DEFAULTS["image"]),
+                memory=get_setting("sandbox_memory", SANDBOX_DEFAULTS["memory"]),
+                network=get_setting("sandbox_network_access", SANDBOX_DEFAULTS["network"]),
+            )
+            await sandbox_manager.get_or_create(
+                session_id=session_id,
+                workspace_dir=_sandbox_dir,
+                config=_config,
+                workspace_id=_sandbox_wid,
+            )
 
         # bash tool
         if tool == "bash":
@@ -1169,6 +1209,8 @@ async def execute_tool_block(
     owner: Optional[str] = None,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
+    sandbox_manager: Optional[Any] = None,
+    workspace_id: Optional[str] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -1279,13 +1321,13 @@ async def execute_tool_block(
     if tool in _MCP_TOOL_MAP:
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _call_mcp_tool(tool, content, progress_cb=progress_cb, workspace=workspace)
+        result = await _call_mcp_tool(tool, content, progress_cb=progress_cb, workspace=workspace, sandbox_manager=sandbox_manager, workspace_id=workspace_id, session_id=session_id)
     elif tool in ("grep", "glob", "ls"):
         # Code-navigation tools — no MCP server; run the direct implementation.
         # Confined to the workspace when one is set (same policy as read_file).
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace) \
+        result = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace, sandbox_manager=sandbox_manager, workspace_id=workspace_id, session_id=session_id) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]

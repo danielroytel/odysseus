@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class SandboxConfig:
 class SandboxContainer:
     """Represents a running sandbox container."""
     container_id: str
-    session_id: str
+    workspace_id: str
     workspace_dir: str
     container_workspace: str  # always "/workspace"
     image: str
@@ -49,10 +49,21 @@ class SandboxContainer:
 
 
 class SandboxManager:
-    """Manages per-session Docker containers for agent tool isolation."""
+    """Manages workspace-keyed Docker containers for agent tool isolation.
+
+    Containers are keyed by ``workspace_id`` so multiple sessions can share
+    the same container.  A reference set tracks which sessions are using each
+    container; the container is only destroyed when the last session releases
+    it (or it times out).
+    """
 
     def __init__(self) -> None:
+        # workspace_id → SandboxContainer
         self._containers: Dict[str, SandboxContainer] = {}
+        # workspace_id → {session_id, ...}
+        self._references: Dict[str, Set[str]] = {}
+        # session_id → workspace_id  (reverse lookup for exec/release)
+        self._session_to_workspace: Dict[str, str] = {}
         self._runtime: Optional[str] = None
         self._lock: asyncio.Lock = asyncio.Lock()
 
@@ -85,32 +96,52 @@ class SandboxManager:
         self,
         session_id: str,
         workspace_dir: str,
-        config: SandboxConfig
+        config: SandboxConfig,
+        workspace_id: Optional[str] = None,
     ) -> SandboxContainer:
-        """Get existing container or create new one for session."""
+        """Get existing container or create new one for the session's workspace.
+
+        If ``workspace_id`` is provided, multiple sessions sharing the same
+        workspace will reuse the same container.  When ``workspace_id`` is
+        ``None`` (legacy / per-session mode) a unique id is derived from the
+        session id so the behaviour is identical to the old code.
+        """
+        wid = workspace_id or f"_session_{session_id}"
+
         async with self._lock:
             # Ensure runtime is detected
             if not self._runtime:
                 await self.detect_runtime()
 
-            existing = self._containers.get(session_id)
+            # Register the session → workspace mapping
+            self._session_to_workspace[session_id] = wid
+            self._references.setdefault(wid, set()).add(session_id)
+
+            existing = self._containers.get(wid)
             now = time.time()
 
             if existing:
                 if existing.image == config.image:
-                    # Update last_used_at and return existing container
                     existing.last_used_at = now
-                    logger.debug(f"Reusing existing container for session {session_id}")
+                    logger.debug(
+                        "Reusing container %s for session %s (workspace %s)",
+                        existing.container_id[:12], session_id, wid,
+                    )
                     return existing
                 else:
-                    # Image changed, cleanup old container first
-                    logger.info(f"Image changed for session {session_id}, cleaning up old container")
-                    await self.cleanup(session_id)
+                    logger.info(
+                        "Image changed for workspace %s, cleaning up old container",
+                        wid,
+                    )
+                    await self._cleanup_workspace(wid)
 
             # Create new container
-            container = await self._create_container(session_id, workspace_dir, config)
-            self._containers[session_id] = container
-            logger.info(f"Created new container {container.container_id} for session {session_id}")
+            container = await self._create_container(wid, workspace_dir, config)
+            self._containers[wid] = container
+            logger.info(
+                "Created container %s for workspace %s (session %s)",
+                container.container_id[:12], wid, session_id,
+            )
             return container
 
     async def exec(
@@ -127,7 +158,10 @@ class SandboxManager:
         Returns (exit_code, stdout, stderr).
         Raises SandboxError if container is not running.
         """
-        container = self._containers.get(session_id)
+        wid = self._session_to_workspace.get(session_id)
+        if not wid:
+            raise SandboxError(f"No container found for session {session_id}")
+        container = self._containers.get(wid)
         if not container:
             raise SandboxError(f"No container found for session {session_id}")
 
@@ -139,10 +173,14 @@ class SandboxManager:
             ])
             if running.strip() != "true":
                 # Container died, remove from tracking
-                self._containers.pop(session_id, None)
+                self._containers.pop(wid, None)
+                self._session_to_workspace.pop(session_id, None)
+                self._references.pop(wid, None)
                 raise SandboxError(f"Container {container.container_id} is not running")
         except SandboxError:
-            self._containers.pop(session_id, None)
+            self._containers.pop(wid, None)
+            self._session_to_workspace.pop(session_id, None)
+            self._references.pop(wid, None)
             raise
 
         # Build exec command
@@ -225,7 +263,10 @@ class SandboxManager:
 
     async def read_file(self, session_id: str, path: str) -> str:
         """Read file content from container."""
-        container = self._containers.get(session_id)
+        wid = self._session_to_workspace.get(session_id)
+        if not wid:
+            raise SandboxError(f"No container found for session {session_id}")
+        container = self._containers.get(wid)
         if not container:
             raise SandboxError(f"No container found for session {session_id}")
 
@@ -239,7 +280,10 @@ class SandboxManager:
 
     async def write_file(self, session_id: str, path: str, content: str) -> None:
         """Write content to file in container."""
-        container = self._containers.get(session_id)
+        wid = self._session_to_workspace.get(session_id)
+        if not wid:
+            raise SandboxError(f"No container found for session {session_id}")
+        container = self._containers.get(wid)
         if not container:
             raise SandboxError(f"No container found for session {session_id}")
 
@@ -256,21 +300,57 @@ class SandboxManager:
         if exit_code != 0:
             raise SandboxError(f"Failed to write file {path}: {stderr}")
 
+    async def release(self, session_id: str) -> None:
+        """Release a session's reference to its workspace container.
+
+        If this was the last session using the workspace the container is
+        stopped and removed.
+        """
+        wid = self._session_to_workspace.pop(session_id, None)
+        if not wid:
+            return
+
+        refs = self._references.get(wid)
+        if refs:
+            refs.discard(session_id)
+            if refs:
+                # Other sessions still using this container
+                logger.debug(
+                    "Session %s released workspace %s (%d session(s) remain)",
+                    session_id, wid, len(refs),
+                )
+                return
+
+        # Last session — destroy the container
+        await self._cleanup_workspace(wid)
+
     async def cleanup(self, session_id: str) -> None:
-        """Stop and remove container for session."""
-        container = self._containers.pop(session_id, None)
+        """Stop and remove container for session (legacy convenience wrapper).
+
+        Equivalent to ``release()`` — destroys container only when the last
+        session using the workspace is released.
+        """
+        await self.release(session_id)
+
+    async def _cleanup_workspace(self, workspace_id: str) -> None:
+        """Stop and remove a workspace container, purge all tracking."""
+        container = self._containers.pop(workspace_id, None)
+        self._references.pop(workspace_id, None)
+        # Purge any session → workspace mappings pointing here
+        self._session_to_workspace = {
+            s: w for s, w in self._session_to_workspace.items()
+            if w != workspace_id
+        }
         if not container:
             return
 
         try:
-            # Stop container
             await self._docker_cmd(["stop", container.container_id], timeout=30)
             logger.debug(f"Stopped container {container.container_id}")
         except SandboxError as e:
             logger.warning(f"Failed to stop container {container.container_id}: {e}")
 
         try:
-            # Remove container
             await self._docker_cmd(["rm", container.container_id], timeout=30)
             logger.debug(f"Removed container {container.container_id}")
         except SandboxError as e:
@@ -279,17 +359,19 @@ class SandboxManager:
     async def cleanup_idle(self) -> int:
         """Clean up containers that have exceeded idle timeout.
 
-        Returns count of cleaned containers.
+        Only cleans up containers whose reference set is empty (no active
+        sessions). Returns count of cleaned containers.
         """
         now = time.time()
         to_cleanup = []
 
-        for session_id, container in self._containers.items():
-            if now - container.last_used_at > container.config.idle_timeout:
-                to_cleanup.append(session_id)
+        for wid, container in self._containers.items():
+            refs = self._references.get(wid, set())
+            if not refs and now - container.last_used_at > container.config.idle_timeout:
+                to_cleanup.append(wid)
 
-        for session_id in to_cleanup:
-            await self.cleanup(session_id)
+        for wid in to_cleanup:
+            await self._cleanup_workspace(wid)
 
         if to_cleanup:
             logger.info(f"Cleaned up {len(to_cleanup)} idle containers")
@@ -302,10 +384,10 @@ class SandboxManager:
         Returns total count of cleaned containers.
         """
         count = len(self._containers)
-        session_ids = list(self._containers.keys())
+        workspace_ids = list(self._containers.keys())
 
-        for session_id in session_ids:
-            await self.cleanup(session_id)
+        for wid in workspace_ids:
+            await self._cleanup_workspace(wid)
 
         logger.info(f"Cleaned up all {count} containers")
         return count
@@ -321,7 +403,7 @@ class SandboxManager:
         try:
             output = await self._docker_cmd([
                 "ps", "-a",
-                "--filter", "name=odysseus-sandbox-",
+                "--filter", "name=odysseus-ws-",
                 "--format", "{{.ID}}"
             ])
 
@@ -351,12 +433,12 @@ class SandboxManager:
 
     async def _create_container(
         self,
-        session_id: str,
+        workspace_id: str,
         workspace_dir: str,
         config: SandboxConfig
     ) -> SandboxContainer:
         """Create new sandbox container."""
-        container_name = f"odysseus-sandbox-{session_id}"
+        container_name = f"odysseus-ws-{workspace_id}"
         cmd = [
             "run", "-d",
             "--name", container_name,
@@ -400,6 +482,17 @@ class SandboxManager:
         for mount in config.extra_bind_mounts:
             cmd.extend(["-v", mount])
 
+        # Dynamic service env vars so tools inside the sandbox can reach
+        # the Odysseus app and search engine.
+        app_port = os.environ.get("APP_PORT", "7000")
+        cmd.extend(["-e", f"ODYSSEUS_APP_URL=http://host.docker.internal:{app_port}"])
+        searxng = os.environ.get("SEARXNG_INSTANCE", "")
+        if searxng:
+            # Inside Docker Compose the var is overridden to http://searxng:8080,
+            # but the sandbox container is on the host network so use the
+            # host-side address.
+            cmd.extend(["-e", f"ODYSSEUS_SEARXNG_URL={searxng}"])
+
         cmd.extend([config.image, "sleep", "infinity"])
 
         try:
@@ -409,7 +502,7 @@ class SandboxManager:
             now = time.time()
             return SandboxContainer(
                 container_id=container_id,
-                session_id=session_id,
+                workspace_id=workspace_id,
                 workspace_dir=workspace_dir,
                 container_workspace="/workspace",
                 image=config.image,
@@ -456,9 +549,12 @@ class SandboxManager:
     async def container_stats(self) -> List[Dict]:
         """Collect resource stats for all active containers."""
         stats = []
-        for session_id, container in self._containers.items():
+        for wid, container in self._containers.items():
+            refs = self._references.get(wid, set())
             stat = {
-                "session_id": session_id,
+                "workspace_id": wid,
+                "sessions": list(refs),
+                "session_count": len(refs),
                 "container_id": container.container_id[:12],
                 "image": container.image,
                 "workspace_dir": container.workspace_dir,

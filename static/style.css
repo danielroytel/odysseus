@@ -1442,6 +1442,17 @@ body.bg-pattern-sparkles {
       flex-shrink: 0;
       position: relative;
     }
+    .session-workspace-badge {
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: color-mix(in srgb, var(--accent, var(--red)) 15%, transparent);
+      color: var(--accent, var(--red));
+      flex-shrink: 0;
+      line-height: 1.2;
+    }
     .session-star.processing {
       animation: research-pulse 1.5s ease-in-out infinite;
     }

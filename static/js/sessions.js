@@ -351,6 +351,15 @@ function createSessionItem(s) {
   span.title = (s.model ? s.model.split('/').pop() + ' · ' : '') + chatTitle;
   span.classList.add('text-ellipsis');
 
+  // Workspace badge — small tag when session is attached to a workspace
+  if (s.workspace_id) {
+    const badge = document.createElement('span');
+    badge.className = 'session-workspace-badge';
+    badge.textContent = 'WS';
+    badge.title = 'Attached to workspace';
+    div.appendChild(badge);
+  }
+
   // Double-click to rename (only when session is already selected)
   if (!isOpenClaw) {
     span.addEventListener('dblclick', (e) => {
@@ -561,6 +570,90 @@ function createSessionItem(s) {
   const folderItem = buildFolderSubmenu(s.id, s.folder, dropdown);
   dropdown.appendChild(copyItem);
   dropdown.appendChild(folderItem);
+
+  // Attach / Detach workspace
+  const _wsIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>';
+  if (s.workspace_id) {
+    const detachItem = document.createElement('div');
+    detachItem.className = 'dropdown-item-compact';
+    detachItem.innerHTML = _icon(_wsIcon) + '<span>Detach from workspace</span>';
+    detachItem.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      dropdown.style.display = 'none';
+      try {
+        await fetch(`${API_BASE}/api/workspace/${s.workspace_id}/sessions/${s.id}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        });
+        s.workspace_id = null;
+        uiModule.showToast('Detached from workspace');
+        renderSessionList();
+      } catch (err) {
+        uiModule.showToast('Failed to detach');
+      }
+    });
+    dropdown.appendChild(detachItem);
+  } else {
+    const wsItem = document.createElement('div');
+    wsItem.className = 'dropdown-item-compact';
+    wsItem.style.position = 'relative';
+    wsItem.innerHTML = _icon(_wsIcon) + '<span>Attach to workspace</span>';
+    // Build a submenu with available workspaces on hover/click
+    const wsSub = document.createElement('div');
+    wsSub.className = 'dropdown session-folder-submenu';
+    wsSub.style.display = 'none';
+    wsSub.innerHTML = '<div class="admin-toggle-sub" style="padding:6px 8px">Loading...</div>';
+    const showWsSub = async () => {
+      if (wsSub.dataset.loaded) return;
+      try {
+        const res = await fetch('/api/workspace', { credentials: 'same-origin' });
+        const workspaces = await res.json();
+        wsSub.innerHTML = '';
+        if (!workspaces.length) {
+          wsSub.innerHTML = '<div class="dropdown-item-compact" style="opacity:0.4;pointer-events:none">No workspaces</div>';
+        }
+        workspaces.forEach(ws => {
+          const opt = document.createElement('div');
+          opt.className = 'dropdown-item-compact';
+          opt.textContent = ws.name;
+          opt.addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            dropdown.style.display = 'none';
+            try {
+              await fetch(`${API_BASE}/api/workspace/${ws.id}/sessions/${s.id}`, {
+                method: 'PUT',
+                credentials: 'same-origin',
+              });
+              s.workspace_id = ws.id;
+              uiModule.showToast('Attached to ' + ws.name);
+              renderSessionList();
+            } catch (err) {
+              uiModule.showToast('Failed to attach');
+            }
+          });
+          wsSub.appendChild(opt);
+        });
+        wsSub.dataset.loaded = '1';
+      } catch (err) {
+        wsSub.innerHTML = '<div class="dropdown-item-compact" style="opacity:0.4">Error loading</div>';
+      }
+    };
+    wsItem.addEventListener('mouseenter', showWsSub);
+    wsItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Position submenu
+      const rect = wsItem.getBoundingClientRect();
+      wsSub.style.position = 'fixed';
+      wsSub.style.left = (rect.right + 4) + 'px';
+      wsSub.style.top = rect.top + 'px';
+      wsSub.style.display = wsSub.style.display === 'block' ? 'none' : 'block';
+      document.body.appendChild(wsSub);
+      showWsSub();
+    });
+    dropdown.appendChild(wsItem);
+    // Store submenu ref for cleanup
+    div._wsSub = wsSub;
+  }
 
   // Separator before destructive actions
   const _sep = document.createElement('div');
