@@ -362,7 +362,7 @@ function _openVisionEditor(att, userMsgEl) {
       await _saveVisionText();
       _closeVisionEditor();
       if (userMsgEl && window.chatModule?.resendUserMessage) {
-        window.chatModule.resendUserMessage(userMsgEl);
+        window.chatModule.resendUserMessage(userMsgEl, { replaceFromHere: true });
       } else if (uiModule?.showToast) {
         uiModule.showToast('Saved');
       }
@@ -635,8 +635,8 @@ export function applyModelColor(roleEl, modelName) {
       popup.className = 'ctx-popup';
       let html = '<div style="font-weight:600;margin-bottom:6px;color:var(--fg);display:flex;align-items:center;gap:6px;">';
       if (logoHtml) html += '<span class="role-provider-logo" style="opacity:0.7">' + logoHtml + '</span>';
-      html += short + '</div>';
-      html += '<div><span class="ctx-label">Model</span> ' + modelName.split('/').pop() + '</div>';
+      html += uiModule.esc(short) + '</div>';
+      html += '<div><span class="ctx-label">Model</span> ' + uiModule.esc(modelName.split('/').pop()) + '</div>';
       // Provider = the serving endpoint, distinct from the model vendor/logo
       // (e.g. the same model via OpenRouter vs Copilot vs Anthropic direct).
       const _epUrl = (window.sessionModule && window.sessionModule.getCurrentEndpointUrl)
@@ -860,6 +860,20 @@ export function stripToolBlocks(text) {
   cleaned = cleaned.replace(TOOL_NARRATION_RE, '');
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
   return cleaned.trim();
+}
+
+/**
+ * Plain-text payload for the message copy buttons: the reply as the renderer
+ * displays it — tool blocks and <think> reasoning stripped. dataset.raw keeps
+ * the full model output (chat.js even embeds the elapsed time into the
+ * <think> tag for reload persistence), so copying it verbatim leaks the
+ * thinking block (#3722). Falls back to the raw text when stripping leaves
+ * nothing (e.g. turns interrupted mid-thinking).
+ */
+export function copyMessageText(msgElement) {
+  const raw = msgElement.dataset.raw || msgElement.querySelector('.body')?.textContent || '';
+  const { content } = markdownModule.extractThinkingBlocks(stripToolBlocks(raw));
+  return content || raw;
 }
 
 /**
@@ -1372,7 +1386,7 @@ export function createMsgFooter(msgElement) {
     { id: 'copy', icon: COPY_ICON, title: 'Copy message', cls: 'footer-copy-btn', html: true, handler(e) {
       e.stopPropagation();
       const btn = e.currentTarget;
-      uiModule.copyToClipboard(msgElement.dataset.raw || msgElement.querySelector('.body')?.textContent || '');
+      uiModule.copyToClipboard(copyMessageText(msgElement));
       btn.innerHTML = CHECK_ICON;
       setTimeout(() => { btn.innerHTML = COPY_ICON; }, 1500);
     }},
@@ -2444,6 +2458,7 @@ const chatRenderer = {
   updateSessionCostUI,
   roleTimestamp,
   stripToolBlocks,
+  copyMessageText,
   safeToolScreenshotSrc,
   safeDisplayImageSrc,
   buildSourcesBox,
